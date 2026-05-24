@@ -13,11 +13,31 @@
 #include "hw/intc/riscv_aclint.h"
 #include "hw/intc/sifive_plic.h"
 #include "hw/loader.h"
+#include "hw/riscv/boot.h"
 #include "hw/riscv/pz7110.h"
 #include "hw/riscv/riscv_hart.h"
 #include "hw/sysbus.h"
 #include "system/system.h"
 #include "target/riscv/cpu.h"
+#include <libfdt.h>
+
+static RISCVException pz7110_csr_any(CPURISCVState *env, int csrno)
+{
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException pz7110_read_zero(CPURISCVState *env, int csrno,
+                                       target_ulong *val)
+{
+    *val = 0;
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException pz7110_write_ignore(CPURISCVState *env, int csrno,
+                                          target_ulong val)
+{
+    return RISCV_EXCP_NONE;
+}
 
 static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_MROM] = { 0x2a000000, 0x10000 },
@@ -27,6 +47,92 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_UART0] = { 0x10000000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
 };
+
+static uint64_t pz7110_quiet_stub_read(void *opaque, hwaddr addr,
+                                       unsigned int size)
+{
+    return 0;
+}
+
+static void pz7110_quiet_stub_write(void *opaque, hwaddr addr, uint64_t value,
+                                    unsigned int size)
+{
+}
+
+static const MemoryRegionOps pz7110_quiet_stub_ops = {
+    .read = pz7110_quiet_stub_read,
+    .write = pz7110_quiet_stub_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 1,
+    .valid.max_access_size = 8,
+};
+
+static void pz7110_create_quiet_stub(const char *name, hwaddr base,
+                                     hwaddr size)
+{
+    MemoryRegion *mr = g_new0(MemoryRegion, 1);
+
+    memory_region_init_io(mr, NULL, &pz7110_quiet_stub_ops, NULL, name, size);
+    memory_region_add_subregion(get_system_memory(), base, mr);
+}
+
+typedef struct PZ7110DwI2CStubState {
+    uint32_t enable;
+} PZ7110DwI2CStubState;
+
+static uint64_t pz7110_dw_i2c_stub_read(void *opaque, hwaddr addr,
+                                        unsigned int size)
+{
+    PZ7110DwI2CStubState *s = opaque;
+
+    switch (addr) {
+    case 0x34: /* IC_RAW_INTR_STAT */
+        return 0;
+    case 0x6c: /* IC_ENABLE */
+    case 0x9c: /* IC_ENABLE_STATUS */
+        return s->enable;
+    case 0x70: /* IC_STATUS: TX FIFO empty and not full */
+        return BIT(2) | BIT(1);
+    case 0x74: /* IC_TXFLR */
+    case 0x78: /* IC_RXFLR */
+        return 0;
+    case 0xf4: /* IC_COMP_PARAM_1 */
+        return (15 << 0) | (15 << 8) | (2 << 16);
+    case 0xf8: /* IC_COMP_VERSION */
+        return 0x3230312a;
+    case 0xfc: /* IC_COMP_TYPE */
+        return 0x44570140;
+    default:
+        return 0;
+    }
+}
+
+static void pz7110_dw_i2c_stub_write(void *opaque, hwaddr addr, uint64_t value,
+                                     unsigned int size)
+{
+    PZ7110DwI2CStubState *s = opaque;
+
+    if (addr == 0x6c) {
+        s->enable = value & 1;
+    }
+}
+
+static const MemoryRegionOps pz7110_dw_i2c_stub_ops = {
+    .read = pz7110_dw_i2c_stub_read,
+    .write = pz7110_dw_i2c_stub_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 4,
+    .valid.max_access_size = 4,
+};
+
+static void pz7110_create_dw_i2c_stub(const char *name, hwaddr base)
+{
+    MemoryRegion *mr = g_new0(MemoryRegion, 1);
+    PZ7110DwI2CStubState *s = g_new0(PZ7110DwI2CStubState, 1);
+
+    memory_region_init_io(mr, NULL, &pz7110_dw_i2c_stub_ops, s, name, 0x10000);
+    memory_region_add_subregion(get_system_memory(), base, mr);
+}
 
 static DeviceState *pz7110_create_plic(const MemMapEntry *memmap,
                                        int base_hartid, int hart_count)
@@ -48,6 +154,76 @@ static DeviceState *pz7110_create_plic(const MemMapEntry *memmap,
                               memmap[PZ7110_PLIC].size);
 }
 
+static ssize_t pz7110_patch_spl_dtb(void *image, size_t image_size)
+{
+    static const char * const spl_nodes[] = {
+        "/soc",
+        "/soc/spi@13010000",
+        "/soc/spi@13010000/nor-flash@0",
+    };
+    static const char spl_spi0_path[] = "/soc/spi@13010000";
+    const size_t extra = 1024;
+    char *base = image;
+
+    for (size_t off = 0; off + sizeof(struct fdt_header) < image_size;
+         off += 4) {
+        void *dtb = base + off;
+        int totalsize;
+        void *patched;
+
+        if (fdt_magic(dtb) != FDT_MAGIC || fdt_check_header(dtb)) {
+            continue;
+        }
+
+        totalsize = fdt_totalsize(dtb);
+        if (totalsize <= 0 || off + totalsize > image_size) {
+            continue;
+        }
+
+        /*
+         * VisionFive2 SPL's generated DTB has /firmware spi0 pointing at
+         * an old qspi@11860000 path. Replace it in place so this works even
+         * when the DTB has no spare room for fdt_setprop().
+         */
+        {
+            int firmware = fdt_path_offset(dtb, "/firmware");
+            int len = 0;
+            char *spi0;
+
+            if (firmware >= 0) {
+                spi0 = (char *)fdt_getprop(dtb, firmware, "spi0", &len);
+                if (spi0 && len >= sizeof(spl_spi0_path)) {
+                    memset(spi0, 0, len);
+                    memcpy(spi0, spl_spi0_path, sizeof(spl_spi0_path));
+                }
+            }
+        }
+
+        if (off + totalsize + extra <= image_size) {
+            patched = g_malloc0(totalsize + extra);
+            if (fdt_open_into(dtb, patched, totalsize + extra)) {
+                g_free(patched);
+                return off;
+            }
+
+            for (int i = 0; i < ARRAY_SIZE(spl_nodes); i++) {
+                int node = fdt_path_offset(patched, spl_nodes[i]);
+
+                if (node >= 0) {
+                    fdt_setprop(patched, node, "u-boot,dm-spl", NULL, 0);
+                }
+            }
+
+            memcpy(dtb, patched, fdt_totalsize(patched));
+            g_free(patched);
+        }
+
+        return off;
+    }
+
+    return -1;
+}
+
 static void pz7110_machine_init(MachineState *machine)
 {
     RISCVPZ7110State *s = RISCV_PZ7110_MACHINE(machine);
@@ -56,10 +232,31 @@ static void pz7110_machine_init(MachineState *machine)
     MemoryRegion *mask_rom = g_new(MemoryRegion, 1);
     MemoryRegion *sram = g_new(MemoryRegion, 1);
     DeviceState *irqchip;
+    const char *firmware_name;
+    hwaddr firmware_load_addr = memmap[PZ7110_SRAM].base;
+    target_ulong firmware_end_addr;
+    ssize_t spl_dtb_offset = -1;
+    uint64_t spl_fdt_load_addr = 0;
     uint32_t park_loop[] = {
         0x10500073, /* wfi */
         0xffdff06f, /* j . */
     };
+
+    /*
+     * SPL writes the SiFive U74 feature-disable CSR during early M-mode
+     * setup.  Keep this machine-local; do not modify global CSR tables for
+     * unrelated RISC-V machines.
+     */
+    {
+        static riscv_csr_operations u74_csr = {
+            .name = "u74_feature_disable",
+            .predicate = pz7110_csr_any,
+            .read = pz7110_read_zero,
+            .write = pz7110_write_ignore,
+        };
+
+        csr_ops[0x7c1] = u74_csr;
+    }
 
     object_initialize_child(OBJECT(machine), "e-cpus", &s->e_cpus,
                             TYPE_RISCV_HART_ARRAY);
@@ -116,8 +313,6 @@ static void pz7110_machine_init(MachineState *machine)
         park_loop[i] = cpu_to_le32(park_loop[i]);
     }
 
-    rom_add_blob_fixed_as("mrom.u74-park", park_loop, sizeof(park_loop),
-                          memmap[PZ7110_MROM].base, &address_space_memory);
     rom_add_blob_fixed_as("mrom.s7-park", park_loop, sizeof(park_loop),
                           memmap[PZ7110_MROM].base + 0x100,
                           &address_space_memory);
@@ -125,6 +320,70 @@ static void pz7110_machine_init(MachineState *machine)
     serial_mm_init(system_memory, memmap[PZ7110_UART0].base,
                    2, qdev_get_gpio_in(irqchip, UART0_IRQ), 24000000,
                    serial_hd(0), DEVICE_LITTLE_ENDIAN);
+
+    /*
+     * Temporary passive windows for early SPL register touches.  These are not
+     * complete device models; later subsystem commits replace them with
+     * register-aware models.
+     */
+    pz7110_create_quiet_stub("pz7110.spi-boot", 0x11000000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.qspi", 0x13010000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.dmc", 0x15700000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.ddr-phy", 0x13000000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.sys-crg", 0x13020000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.stg-crg", 0x10230000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.aon-crg", 0x17000000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.sys-syscon", 0x13030000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.aon-syscon", 0x17010000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.sys-iomux", 0x13040000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.aon-iomux", 0x17020000, 0x10000);
+    pz7110_create_dw_i2c_stub("pz7110.i2c0", 0x10030000);
+    pz7110_create_dw_i2c_stub("pz7110.i2c1", 0x10040000);
+    pz7110_create_dw_i2c_stub("pz7110.i2c2", 0x10050000);
+    pz7110_create_dw_i2c_stub("pz7110.i2c3", 0x12030000);
+    pz7110_create_dw_i2c_stub("pz7110.i2c4", 0x12040000);
+    pz7110_create_dw_i2c_stub("pz7110.i2c5", 0x12050000);
+    pz7110_create_dw_i2c_stub("pz7110.i2c6", 0x12060000);
+
+    firmware_name = riscv_default_firmware_name(&s->u_cpus);
+    firmware_end_addr = riscv_find_and_load_firmware(machine, firmware_name,
+                                                     &firmware_load_addr,
+                                                     NULL);
+    if (firmware_end_addr > firmware_load_addr) {
+        spl_dtb_offset = pz7110_patch_spl_dtb(
+            memory_region_get_ram_ptr(sram), memmap[PZ7110_SRAM].size);
+    }
+
+    if (spl_dtb_offset >= 0) {
+        spl_fdt_load_addr = firmware_load_addr + spl_dtb_offset;
+    }
+
+    {
+        uint32_t reset_vec[] = {
+            0xf1402573,                  /* csrr   a0, mhartid */
+            0x00100313,                  /* li     t1, 1 */
+            0x00651c63,                  /* bne    a0, t1, park */
+            0x00000297,                  /* auipc  t0, 0 */
+            0x00000613,                  /* li     a2, 0 */
+            0x0242b583,                  /* ld     a1, 36(t0) */
+            0x01c2b283,                  /* ld     t0, 28(t0) */
+            0x00028067,                  /* jr     t0 */
+            0x10500073,                  /* park:  wfi */
+            0xffdff06f,                  /* j      park */
+            firmware_load_addr,
+            firmware_load_addr >> 32,
+            spl_fdt_load_addr,
+            spl_fdt_load_addr >> 32,
+        };
+
+        for (int i = 0; i < ARRAY_SIZE(reset_vec); i++) {
+            reset_vec[i] = cpu_to_le32(reset_vec[i]);
+        }
+
+        rom_add_blob_fixed_as("mrom.reset", reset_vec, sizeof(reset_vec),
+                              memmap[PZ7110_MROM].base,
+                              &address_space_memory);
+    }
 }
 
 static void pz7110_machine_class_init(ObjectClass *oc, void *data)
