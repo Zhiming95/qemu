@@ -41,6 +41,11 @@ config OPENTITAN
     select SIFIVE_PLIC
     select UNIMP
 
+config PZ7110
+    bool
+    default y
+    depends on RISCV64
+
 config RISCV_VIRT
     bool
     default y
