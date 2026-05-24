@@ -45,6 +45,14 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_CLINT] = { 0x02000000, 0x10000 },
     [PZ7110_PLIC] = { 0x0c000000, PZ7110_PLIC_SIZE },
     [PZ7110_UART0] = { 0x10000000, 0x10000 },
+    [PZ7110_SYS_CRG_IDX] = { 0x13020000, 0x10000 },
+    [PZ7110_STG_CRG_IDX] = { 0x10230000, 0x10000 },
+    [PZ7110_AON_CRG_IDX] = { 0x17000000, 0x10000 },
+    [PZ7110_SYS_SYSCON_IDX] = { 0x13030000, 0x10000 },
+    [PZ7110_STG_SYSCON_IDX] = { 0x10240000, 0x10000 },
+    [PZ7110_AON_SYSCON_IDX] = { 0x17010000, 0x10000 },
+    [PZ7110_SYS_IOMUX_IDX] = { 0x13040000, 0x10000 },
+    [PZ7110_AON_IOMUX_IDX] = { 0x17020000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
 };
 
@@ -321,6 +329,58 @@ static void pz7110_machine_init(MachineState *machine)
                    2, qdev_get_gpio_in(irqchip, UART0_IRQ), 24000000,
                    serial_hd(0), DEVICE_LITTLE_ENDIAN);
 
+    object_initialize_child(OBJECT(machine), "sys-crg", &s->sys_crg,
+                            TYPE_PZ7110_SYS_CRG);
+    sysbus_realize(SYS_BUS_DEVICE(&s->sys_crg), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sys_crg), 0,
+                    memmap[PZ7110_SYS_CRG_IDX].base);
+
+    object_initialize_child(OBJECT(machine), "stg-crg", &s->stg_crg,
+                            TYPE_PZ7110_STG_CRG);
+    sysbus_realize(SYS_BUS_DEVICE(&s->stg_crg), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->stg_crg), 0,
+                    memmap[PZ7110_STG_CRG_IDX].base);
+
+    object_initialize_child(OBJECT(machine), "aon-crg", &s->aon_crg,
+                            TYPE_PZ7110_AON_CRG);
+    sysbus_realize(SYS_BUS_DEVICE(&s->aon_crg), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->aon_crg), 0,
+                    memmap[PZ7110_AON_CRG_IDX].base);
+
+    object_initialize_child(OBJECT(machine), "sys-syscon", &s->sys_syscon,
+                            TYPE_PZ7110_SYS_SYSCON);
+    sysbus_realize(SYS_BUS_DEVICE(&s->sys_syscon), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sys_syscon), 0,
+                    memmap[PZ7110_SYS_SYSCON_IDX].base);
+
+    object_initialize_child(OBJECT(machine), "stg-syscon", &s->stg_syscon,
+                            TYPE_PZ7110_STG_SYSCON);
+    sysbus_realize(SYS_BUS_DEVICE(&s->stg_syscon), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->stg_syscon), 0,
+                    memmap[PZ7110_STG_SYSCON_IDX].base);
+
+    object_initialize_child(OBJECT(machine), "aon-syscon", &s->aon_syscon,
+                            TYPE_PZ7110_AON_SYSCON);
+    sysbus_realize(SYS_BUS_DEVICE(&s->aon_syscon), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->aon_syscon), 0,
+                    memmap[PZ7110_AON_SYSCON_IDX].base);
+
+    object_initialize_child(OBJECT(machine), "sys-iomux", &s->sys_iomux,
+                            TYPE_PZ7110_SYS_IOMUX);
+    sysbus_realize(SYS_BUS_DEVICE(&s->sys_iomux), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sys_iomux), 0,
+                    memmap[PZ7110_SYS_IOMUX_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->sys_iomux), 0,
+                       qdev_get_gpio_in(irqchip, SYS_GPIO_IRQ));
+
+    object_initialize_child(OBJECT(machine), "aon-iomux", &s->aon_iomux,
+                            TYPE_PZ7110_AON_IOMUX);
+    sysbus_realize(SYS_BUS_DEVICE(&s->aon_iomux), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->aon_iomux), 0,
+                    memmap[PZ7110_AON_IOMUX_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->aon_iomux), 0,
+                       qdev_get_gpio_in(irqchip, AON_GPIO_IRQ));
+
     /*
      * Temporary passive windows for early SPL register touches.  These are not
      * complete device models; later subsystem commits replace them with
@@ -330,13 +390,6 @@ static void pz7110_machine_init(MachineState *machine)
     pz7110_create_quiet_stub("pz7110.qspi", 0x13010000, 0x10000);
     pz7110_create_quiet_stub("pz7110.dmc", 0x15700000, 0x10000);
     pz7110_create_quiet_stub("pz7110.ddr-phy", 0x13000000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.sys-crg", 0x13020000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.stg-crg", 0x10230000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.aon-crg", 0x17000000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.sys-syscon", 0x13030000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.aon-syscon", 0x17010000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.sys-iomux", 0x13040000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.aon-iomux", 0x17020000, 0x10000);
     pz7110_create_dw_i2c_stub("pz7110.i2c0", 0x10030000);
     pz7110_create_dw_i2c_stub("pz7110.i2c1", 0x10040000);
     pz7110_create_dw_i2c_stub("pz7110.i2c2", 0x10050000);

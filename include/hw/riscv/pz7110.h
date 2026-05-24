@@ -8,6 +8,9 @@
 #define HW_RISCV_PZ7110_H
 
 #include "hw/boards.h"
+#include "hw/riscv/pz7110_crg.h"
+#include "hw/riscv/pz7110_iomux.h"
+#include "hw/riscv/pz7110_syscon.h"
 #include "hw/riscv/riscv_hart.h"
 
 #define TYPE_RISCV_PZ7110_MACHINE MACHINE_TYPE_NAME("pz7110")
@@ -20,6 +23,14 @@ struct RISCVPZ7110State {
 
     RISCVHartArrayState e_cpus;
     RISCVHartArrayState u_cpus;
+    PZ7110SYSCRGState sys_crg;
+    PZ7110STGCRGState stg_crg;
+    PZ7110AONCRGState aon_crg;
+    PZ7110SYSSYSCONState sys_syscon;
+    PZ7110STGSYSCONState stg_syscon;
+    PZ7110AONSYSCONState aon_syscon;
+    PZ7110SysIOMUXState sys_iomux;
+    PZ7110AONIOMUXState aon_iomux;
 };
 
 enum {
@@ -28,11 +39,21 @@ enum {
     PZ7110_CLINT,
     PZ7110_PLIC,
     PZ7110_UART0,
+    PZ7110_SYS_CRG_IDX,
+    PZ7110_STG_CRG_IDX,
+    PZ7110_AON_CRG_IDX,
+    PZ7110_SYS_SYSCON_IDX,
+    PZ7110_STG_SYSCON_IDX,
+    PZ7110_AON_SYSCON_IDX,
+    PZ7110_SYS_IOMUX_IDX,
+    PZ7110_AON_IOMUX_IDX,
     PZ7110_DRAM,
 };
 
 enum {
     UART0_IRQ = 32,
+    AON_GPIO_IRQ = 85,
+    SYS_GPIO_IRQ = 86,
 };
 
 #define PZ7110_HART_COUNT 5
