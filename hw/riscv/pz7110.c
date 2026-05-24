@@ -9,6 +9,9 @@
 #include "qemu/units.h"
 #include "qapi/error.h"
 #include "hw/boards.h"
+#include "hw/char/serial-mm.h"
+#include "hw/intc/riscv_aclint.h"
+#include "hw/intc/sifive_plic.h"
 #include "hw/loader.h"
 #include "hw/riscv/pz7110.h"
 #include "hw/riscv/riscv_hart.h"
@@ -19,8 +22,31 @@
 static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_MROM] = { 0x2a000000, 0x10000 },
     [PZ7110_SRAM] = { 0x08000000, 0x200000 },
+    [PZ7110_CLINT] = { 0x02000000, 0x10000 },
+    [PZ7110_PLIC] = { 0x0c000000, PZ7110_PLIC_SIZE },
+    [PZ7110_UART0] = { 0x10000000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
 };
+
+static DeviceState *pz7110_create_plic(const MemMapEntry *memmap,
+                                       int base_hartid, int hart_count)
+{
+    g_autofree char *plic_hart_config = g_strdup("M,MS,MS,MS,MS");
+
+    return sifive_plic_create(memmap[PZ7110_PLIC].base,
+                              plic_hart_config,
+                              hart_count,
+                              base_hartid,
+                              PZ7110_PLIC_NUM_SOURCES,
+                              (1U << PZ7110_PLIC_NUM_PRIO_BITS) - 1,
+                              PZ7110_PLIC_PRIORITY_BASE,
+                              PZ7110_PLIC_PENDING_BASE,
+                              PZ7110_PLIC_ENABLE_BASE,
+                              PZ7110_PLIC_ENABLE_STRIDE,
+                              PZ7110_PLIC_CONTEXT_BASE,
+                              PZ7110_PLIC_CONTEXT_STRIDE,
+                              memmap[PZ7110_PLIC].size);
+}
 
 static void pz7110_machine_init(MachineState *machine)
 {
@@ -29,6 +55,7 @@ static void pz7110_machine_init(MachineState *machine)
     MemoryRegion *system_memory = get_system_memory();
     MemoryRegion *mask_rom = g_new(MemoryRegion, 1);
     MemoryRegion *sram = g_new(MemoryRegion, 1);
+    DeviceState *irqchip;
     uint32_t park_loop[] = {
         0x10500073, /* wfi */
         0xffdff06f, /* j . */
@@ -59,6 +86,19 @@ static void pz7110_machine_init(MachineState *machine)
                             memmap[PZ7110_MROM].base, &error_abort);
     sysbus_realize(SYS_BUS_DEVICE(&s->u_cpus), &error_fatal);
 
+    riscv_aclint_swi_create(memmap[PZ7110_CLINT].base,
+                            0, PZ7110_HART_COUNT, false);
+    riscv_aclint_mtimer_create(memmap[PZ7110_CLINT].base +
+                               RISCV_ACLINT_SWI_SIZE,
+                               RISCV_ACLINT_DEFAULT_MTIMER_SIZE,
+                               0, PZ7110_HART_COUNT,
+                               RISCV_ACLINT_DEFAULT_MTIMECMP,
+                               RISCV_ACLINT_DEFAULT_MTIME,
+                               RISCV_ACLINT_DEFAULT_TIMEBASE_FREQ,
+                               true);
+
+    irqchip = pz7110_create_plic(memmap, 0, PZ7110_HART_COUNT);
+
     memory_region_add_subregion(system_memory, memmap[PZ7110_DRAM].base,
                                 machine->ram);
 
@@ -81,6 +121,10 @@ static void pz7110_machine_init(MachineState *machine)
     rom_add_blob_fixed_as("mrom.s7-park", park_loop, sizeof(park_loop),
                           memmap[PZ7110_MROM].base + 0x100,
                           &address_space_memory);
+
+    serial_mm_init(system_memory, memmap[PZ7110_UART0].base,
+                   2, qdev_get_gpio_in(irqchip, UART0_IRQ), 24000000,
+                   serial_hd(0), DEVICE_LITTLE_ENDIAN);
 }
 
 static void pz7110_machine_class_init(ObjectClass *oc, void *data)

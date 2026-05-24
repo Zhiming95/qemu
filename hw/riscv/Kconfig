@@ -45,6 +45,8 @@ config PZ7110
     bool
     default y
     depends on RISCV64
+    select RISCV_ACLINT
+    select SIFIVE_PLIC
 
 config RISCV_VIRT
     bool
