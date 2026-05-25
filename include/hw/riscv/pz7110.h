@@ -13,6 +13,7 @@
 #include "hw/riscv/pz7110_iomux.h"
 #include "hw/riscv/pz7110_syscon.h"
 #include "hw/riscv/riscv_hart.h"
+#include "hw/ssi/cadence_qspi.h"
 
 #define TYPE_RISCV_PZ7110_MACHINE MACHINE_TYPE_NAME("pz7110")
 typedef struct RISCVPZ7110State RISCVPZ7110State;
@@ -24,6 +25,7 @@ struct RISCVPZ7110State {
 
     RISCVHartArrayState e_cpus;
     RISCVHartArrayState u_cpus;
+    CadenceQSPIState qspi;
     PZ7110SYSCRGState sys_crg;
     PZ7110STGCRGState stg_crg;
     PZ7110AONCRGState aon_crg;
@@ -32,6 +34,7 @@ struct RISCVPZ7110State {
     PZ7110AONSYSCONState aon_syscon;
     PZ7110SysIOMUXState sys_iomux;
     PZ7110AONIOMUXState aon_iomux;
+    MemoryRegion ccache_mmio;
 };
 
 enum {
@@ -40,6 +43,8 @@ enum {
     PZ7110_CLINT,
     PZ7110_PLIC,
     PZ7110_UART0,
+    PZ7110_QSPI0,
+    PZ7110_QSPI_XIP,
     PZ7110_SYS_CRG_IDX,
     PZ7110_STG_CRG_IDX,
     PZ7110_AON_CRG_IDX,
@@ -59,6 +64,7 @@ enum {
 };
 
 enum {
+    QSPI0_IRQ = 25,
     UART0_IRQ = 32,
     I2C0_IRQ = 35,
     I2C1_IRQ = 36,

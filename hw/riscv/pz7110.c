@@ -8,6 +8,9 @@
 #include "qemu/error-report.h"
 #include "qemu/units.h"
 #include "qapi/error.h"
+#include "system/block-backend-global-state.h"
+#include "system/block-backend-io.h"
+#include "system/blockdev.h"
 #include "hw/boards.h"
 #include "hw/char/serial-mm.h"
 #include "hw/intc/riscv_aclint.h"
@@ -46,6 +49,8 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_CLINT] = { 0x02000000, 0x10000 },
     [PZ7110_PLIC] = { 0x0c000000, PZ7110_PLIC_SIZE },
     [PZ7110_UART0] = { 0x10000000, 0x10000 },
+    [PZ7110_QSPI0] = { 0x13010000, 0x10000 },
+    [PZ7110_QSPI_XIP] = { 0x21000000, 0x8000000 },
     [PZ7110_SYS_CRG_IDX] = { 0x13020000, 0x10000 },
     [PZ7110_STG_CRG_IDX] = { 0x10230000, 0x10000 },
     [PZ7110_AON_CRG_IDX] = { 0x17000000, 0x10000 },
@@ -83,12 +88,142 @@ static const MemoryRegionOps pz7110_quiet_stub_ops = {
     .valid.max_access_size = 8,
 };
 
+static uint64_t pz7110_qspi_xip_read(void *opaque, hwaddr addr, unsigned size)
+{
+    CadenceQSPIState *s = opaque;
+    uint64_t value = 0;
+    uint32_t flash_addr;
+
+    if ((s->regs[0x60 / 4] & BIT(0)) &&
+        s->indirect_ahb_offset < s->indirect_bytes) {
+        flash_addr = s->indirect_addr + s->indirect_ahb_offset;
+        s->indirect_ahb_offset += size;
+        if (s->indirect_ahb_offset > s->indirect_bytes) {
+            s->indirect_ahb_offset = s->indirect_bytes;
+        }
+    } else {
+        flash_addr = addr;
+    }
+
+    for (unsigned i = 0; i < size; i++) {
+        uint8_t byte = 0xff;
+
+        if (flash_addr + i < s->flash_size) {
+            byte = s->flash_data[flash_addr + i];
+        }
+        value |= (uint64_t)byte << (i * 8);
+    }
+
+    return value;
+}
+
+static void pz7110_qspi_xip_write(void *opaque, hwaddr addr, uint64_t value,
+                                  unsigned size)
+{
+    CadenceQSPIState *s = opaque;
+    uint32_t flash_addr = addr;
+
+    if ((s->regs[0x70 / 4] & BIT(0)) && flash_addr < s->flash_size) {
+        for (unsigned i = 0; i < size && flash_addr + i < s->flash_size; i++) {
+            s->flash_data[flash_addr + i] = extract64(value, i * 8, 8);
+        }
+    }
+}
+
+static const MemoryRegionOps pz7110_qspi_xip_ops = {
+    .read = pz7110_qspi_xip_read,
+    .write = pz7110_qspi_xip_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 1,
+        .max_access_size = 8,
+    },
+    .impl = {
+        .min_access_size = 1,
+        .max_access_size = 8,
+    },
+};
+
+typedef struct PZ7110DdrStubState {
+    uint32_t regs[0x10000 / 4];
+    unsigned status518_reads;
+} PZ7110DdrStubState;
+
+static uint64_t pz7110_ddr_stub_read(void *opaque, hwaddr addr, unsigned size)
+{
+    PZ7110DdrStubState *s = opaque;
+
+    switch (addr) {
+    case 0x504:
+        return 0x80000000;
+    case 0x518:
+        return s->status518_reads++ == 0 ? 0x2 : 0x0;
+    default:
+        if (addr + size <= sizeof(s->regs)) {
+            return s->regs[addr >> 2];
+        }
+        return 0;
+    }
+}
+
+static void pz7110_ddr_stub_write(void *opaque, hwaddr addr, uint64_t value,
+                                  unsigned size)
+{
+    PZ7110DdrStubState *s = opaque;
+
+    if (addr == 0x514) {
+        s->status518_reads = 0;
+    }
+    if (addr + size <= sizeof(s->regs)) {
+        s->regs[addr >> 2] = value;
+    }
+}
+
+static const MemoryRegionOps pz7110_ddr_stub_ops = {
+    .read = pz7110_ddr_stub_read,
+    .write = pz7110_ddr_stub_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 4,
+        .max_access_size = 4,
+    },
+};
+
+static uint64_t pz7110_ccache_read(void *opaque, hwaddr addr, unsigned size)
+{
+    return 0;
+}
+
+static void pz7110_ccache_write(void *opaque, hwaddr addr, uint64_t value,
+                                unsigned size)
+{
+}
+
+static const MemoryRegionOps pz7110_ccache_ops = {
+    .read = pz7110_ccache_read,
+    .write = pz7110_ccache_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 4,
+        .max_access_size = 8,
+    },
+};
+
 static void pz7110_create_quiet_stub(const char *name, hwaddr base,
                                      hwaddr size)
 {
     MemoryRegion *mr = g_new0(MemoryRegion, 1);
 
     memory_region_init_io(mr, NULL, &pz7110_quiet_stub_ops, NULL, name, size);
+    memory_region_add_subregion(get_system_memory(), base, mr);
+}
+
+static void pz7110_create_ddr_stub(const char *name, hwaddr base)
+{
+    MemoryRegion *mr = g_new0(MemoryRegion, 1);
+    PZ7110DdrStubState *s = g_new0(PZ7110DdrStubState, 1);
+
+    memory_region_init_io(mr, NULL, &pz7110_ddr_stub_ops, s, name, 0x10000);
     memory_region_add_subregion(get_system_memory(), base, mr);
 }
 
@@ -200,7 +335,9 @@ static void pz7110_machine_init(MachineState *machine)
     MemoryRegion *system_memory = get_system_memory();
     MemoryRegion *mask_rom = g_new(MemoryRegion, 1);
     MemoryRegion *sram = g_new(MemoryRegion, 1);
+    MemoryRegion *xip = g_new(MemoryRegion, 1);
     DeviceState *irqchip;
+    DriveInfo *dinfo;
     const char *firmware_name;
     hwaddr firmware_load_addr = memmap[PZ7110_SRAM].base;
     target_ulong firmware_end_addr;
@@ -265,6 +402,14 @@ static void pz7110_machine_init(MachineState *machine)
 
     irqchip = pz7110_create_plic(memmap, 0, PZ7110_HART_COUNT);
 
+    object_initialize_child(OBJECT(machine), "qspi", &s->qspi,
+                            TYPE_CADENCE_QSPI);
+    sysbus_realize(SYS_BUS_DEVICE(&s->qspi), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->qspi), 0,
+                    memmap[PZ7110_QSPI0].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->qspi), 0,
+                       qdev_get_gpio_in(irqchip, QSPI0_IRQ));
+
     memory_region_add_subregion(system_memory, memmap[PZ7110_DRAM].base,
                                 machine->ram);
 
@@ -277,6 +422,42 @@ static void pz7110_machine_init(MachineState *machine)
                            memmap[PZ7110_SRAM].size, &error_fatal);
     memory_region_add_subregion(system_memory, memmap[PZ7110_SRAM].base,
                                 sram);
+
+    s->qspi.flash_size = memmap[PZ7110_QSPI_XIP].size;
+    s->qspi.flash_data = g_malloc(s->qspi.flash_size);
+    memset(s->qspi.flash_data, 0xff, s->qspi.flash_size);
+    memory_region_init_io(xip, NULL, &pz7110_qspi_xip_ops, &s->qspi,
+                          "pz7110.qspi_xip",
+                          memmap[PZ7110_QSPI_XIP].size);
+    memory_region_add_subregion(system_memory, memmap[PZ7110_QSPI_XIP].base,
+                                xip);
+
+    memory_region_init_io(&s->ccache_mmio, OBJECT(machine),
+                          &pz7110_ccache_ops, s, "pz7110.ccache", 0x40000);
+    memory_region_add_subregion(system_memory, 0x02010000, &s->ccache_mmio);
+
+    dinfo = drive_get(IF_MTD, 0, 0);
+    if (dinfo) {
+        BlockBackend *blk = blk_by_legacy_dinfo(dinfo);
+        int64_t flash_size = blk_getlength(blk);
+
+        if (blk_attach_dev(blk, DEVICE(&s->qspi)) < 0) {
+            error_report("Could not attach PZ7110 QSPI flash image");
+            exit(1);
+        }
+        if (flash_size < 0) {
+            error_report("Could not determine PZ7110 QSPI flash image size");
+            exit(1);
+        }
+        if (flash_size > memmap[PZ7110_QSPI_XIP].size) {
+            flash_size = memmap[PZ7110_QSPI_XIP].size;
+        }
+        s->qspi.flash_size = flash_size;
+        if (blk_pread(blk, 0, flash_size, s->qspi.flash_data, 0) < 0) {
+            error_report("Could not read PZ7110 QSPI flash image");
+            exit(1);
+        }
+    }
 
     for (int i = 0; i < ARRAY_SIZE(park_loop); i++) {
         park_loop[i] = cpu_to_le32(park_loop[i]);
@@ -346,11 +527,10 @@ static void pz7110_machine_init(MachineState *machine)
      * Temporary passive windows for early SPL register touches.  These are not
      * complete device models; later subsystem commits replace them with
      * register-aware models.
-     */
+    */
     pz7110_create_quiet_stub("pz7110.spi-boot", 0x11000000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.qspi", 0x13010000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.dmc", 0x15700000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.ddr-phy", 0x13000000, 0x10000);
+    pz7110_create_ddr_stub("pz7110.dmc", 0x15700000);
+    pz7110_create_ddr_stub("pz7110.ddr-phy", 0x13000000);
 
     pz7110_create_i2c(memmap[PZ7110_I2C0].base,
                       qdev_get_gpio_in(irqchip, I2C0_IRQ), false);
@@ -420,6 +600,7 @@ static void pz7110_machine_class_init(ObjectClass *oc, void *data)
     mc->default_cpu_type = TYPE_RISCV_CPU_BASE;
     mc->default_ram_id = "pz7110.ram";
     mc->default_ram_size = 4 * GiB;
+    mc->block_default_type = IF_MTD;
     mc->auto_create_sdcard = false;
 }
 

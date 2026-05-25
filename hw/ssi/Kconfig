@@ -6,6 +6,10 @@ config SIFIVE_SPI
     bool
     select SSI
 
+config CADENCE_QSPI
+    bool
+    select SSI
+
 config SSI
     bool
 

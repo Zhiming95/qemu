@@ -45,6 +45,7 @@ config PZ7110
     bool
     default y
     depends on RISCV64
+    select CADENCE_QSPI
     select REGISTER
     select RISCV_ACLINT
     select SIFIVE_PLIC
