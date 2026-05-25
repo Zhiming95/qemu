@@ -534,6 +534,7 @@ static void pz7110_machine_init(MachineState *machine)
     pz7110_create_quiet_stub("pz7110.spi-boot", 0x11000000, 0x10000);
     pz7110_create_ddr_stub("pz7110.dmc", 0x15700000);
     pz7110_create_ddr_stub("pz7110.ddr-phy", 0x13000000);
+    pz7110_create_quiet_stub("pz7110.otp", 0x17050000, 0x10000);
 
     pz7110_create_i2c(memmap[PZ7110_I2C0].base,
                       qdev_get_gpio_in(irqchip, I2C0_IRQ), false);
