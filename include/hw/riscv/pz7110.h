@@ -13,6 +13,7 @@
 #include "hw/riscv/pz7110_iomux.h"
 #include "hw/riscv/pz7110_sdio.h"
 #include "hw/riscv/pz7110_syscon.h"
+#include "hw/riscv/pz7110_vout_crg.h"
 #include "hw/riscv/riscv_hart.h"
 #include "hw/ssi/cadence_qspi.h"
 
@@ -37,6 +38,7 @@ struct RISCVPZ7110State {
     PZ7110AONIOMUXState aon_iomux;
     PZ7110SdioState sdio0;
     PZ7110SdioState sdio1;
+    PZ7110VOUTCRGState vout_crg;
     MemoryRegion ccache_mmio;
     MemoryRegion pmu_mmio;
     uint32_t pmu_power_mode;
@@ -67,6 +69,7 @@ enum {
     PZ7110_I2C6,
     PZ7110_SDIO0_IDX,
     PZ7110_SDIO1_IDX,
+    PZ7110_VOUT_CRG_IDX,
     PZ7110_DRAM,
 };
 

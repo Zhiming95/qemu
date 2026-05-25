@@ -69,6 +69,7 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_I2C6] = { 0x12060000, 0x10000 },
     [PZ7110_SDIO0_IDX] = { 0x16010000, 0x10000 },
     [PZ7110_SDIO1_IDX] = { 0x16020000, 0x10000 },
+    [PZ7110_VOUT_CRG_IDX] = { 0x295c0000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
 };
 
@@ -586,6 +587,12 @@ static void pz7110_machine_init(MachineState *machine)
     memory_region_init_io(&s->pmu_mmio, OBJECT(machine), &pz7110_pmu_ops, s,
                           "pz7110.pmu", 0x10000);
     memory_region_add_subregion(system_memory, 0x17030000, &s->pmu_mmio);
+
+    object_initialize_child(OBJECT(machine), "vout-crg", &s->vout_crg,
+                            TYPE_PZ7110_VOUT_CRG);
+    sysbus_realize(SYS_BUS_DEVICE(&s->vout_crg), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->vout_crg), 0,
+                    memmap[PZ7110_VOUT_CRG_IDX].base);
 
     pz7110_create_i2c(memmap[PZ7110_I2C0].base,
                       qdev_get_gpio_in(irqchip, I2C0_IRQ), false);
