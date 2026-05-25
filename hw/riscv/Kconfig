@@ -48,6 +48,7 @@ config PZ7110
     select CADENCE_QSPI
     select REGISTER
     select RISCV_ACLINT
+    select SD
     select SIFIVE_PLIC
 
 config RISCV_VIRT

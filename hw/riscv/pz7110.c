@@ -20,6 +20,7 @@
 #include "hw/riscv/boot.h"
 #include "hw/riscv/pz7110.h"
 #include "hw/riscv/riscv_hart.h"
+#include "hw/sd/sd.h"
 #include "hw/sysbus.h"
 #include "system/system.h"
 #include "target/riscv/cpu.h"
@@ -66,6 +67,8 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_I2C4] = { 0x12040000, 0x10000 },
     [PZ7110_I2C5] = { 0x12050000, 0x10000 },
     [PZ7110_I2C6] = { 0x12060000, 0x10000 },
+    [PZ7110_SDIO0_IDX] = { 0x16010000, 0x10000 },
+    [PZ7110_SDIO1_IDX] = { 0x16020000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
 };
 
@@ -546,6 +549,48 @@ static void pz7110_machine_init(MachineState *machine)
                       qdev_get_gpio_in(irqchip, I2C5_IRQ), true);
     pz7110_create_i2c(memmap[PZ7110_I2C6].base,
                       qdev_get_gpio_in(irqchip, I2C6_IRQ), false);
+
+    object_initialize_child(OBJECT(machine), "sdio0", &s->sdio0,
+                            TYPE_PZ7110_SDIO);
+    dinfo = drive_get(IF_SD, 0, 1);
+    s->sdio0.card_present = dinfo != NULL;
+    s->sdio0.emmc_mode = true;
+    sysbus_realize(SYS_BUS_DEVICE(&s->sdio0), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sdio0), 0,
+                    memmap[PZ7110_SDIO0_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->sdio0), 0,
+                       qdev_get_gpio_in(irqchip, SDIO0_IRQ));
+    if (dinfo) {
+        DeviceState *card = qdev_new(TYPE_EMMC);
+
+        qdev_prop_set_drive_err(card, "drive", blk_by_legacy_dinfo(dinfo),
+                                &error_fatal);
+        qdev_realize_and_unref(card,
+                               qdev_get_child_bus(DEVICE(&s->sdio0),
+                                                  "sd-bus"),
+                               &error_fatal);
+    }
+
+    object_initialize_child(OBJECT(machine), "sdio1", &s->sdio1,
+                            TYPE_PZ7110_SDIO);
+    dinfo = drive_get(IF_SD, 0, 0);
+    s->sdio1.card_present = dinfo != NULL;
+    s->sdio1.emmc_mode = false;
+    sysbus_realize(SYS_BUS_DEVICE(&s->sdio1), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sdio1), 0,
+                    memmap[PZ7110_SDIO1_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->sdio1), 0,
+                       qdev_get_gpio_in(irqchip, SDIO1_IRQ));
+    if (dinfo) {
+        DeviceState *card = qdev_new(TYPE_SD_CARD);
+
+        qdev_prop_set_drive_err(card, "drive", blk_by_legacy_dinfo(dinfo),
+                                &error_fatal);
+        qdev_realize_and_unref(card,
+                               qdev_get_child_bus(DEVICE(&s->sdio1),
+                                                  "sd-bus"),
+                               &error_fatal);
+    }
 
     firmware_name = riscv_default_firmware_name(&s->u_cpus);
     firmware_end_addr = riscv_find_and_load_firmware(machine, firmware_name,
