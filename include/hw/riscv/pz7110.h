@@ -9,6 +9,7 @@
 
 #include "hw/boards.h"
 #include "hw/riscv/pz7110_crg.h"
+#include "hw/riscv/pz7110_i2c.h"
 #include "hw/riscv/pz7110_iomux.h"
 #include "hw/riscv/pz7110_syscon.h"
 #include "hw/riscv/riscv_hart.h"
@@ -47,11 +48,25 @@ enum {
     PZ7110_AON_SYSCON_IDX,
     PZ7110_SYS_IOMUX_IDX,
     PZ7110_AON_IOMUX_IDX,
+    PZ7110_I2C0,
+    PZ7110_I2C1,
+    PZ7110_I2C2,
+    PZ7110_I2C3,
+    PZ7110_I2C4,
+    PZ7110_I2C5,
+    PZ7110_I2C6,
     PZ7110_DRAM,
 };
 
 enum {
     UART0_IRQ = 32,
+    I2C0_IRQ = 35,
+    I2C1_IRQ = 36,
+    I2C2_IRQ = 37,
+    I2C3_IRQ = 48,
+    I2C4_IRQ = 49,
+    I2C5_IRQ = 50,
+    I2C6_IRQ = 51,
     AON_GPIO_IRQ = 85,
     SYS_GPIO_IRQ = 86,
 };

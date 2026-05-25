@@ -13,6 +13,7 @@
 #include "hw/intc/riscv_aclint.h"
 #include "hw/intc/sifive_plic.h"
 #include "hw/loader.h"
+#include "hw/qdev-properties.h"
 #include "hw/riscv/boot.h"
 #include "hw/riscv/pz7110.h"
 #include "hw/riscv/riscv_hart.h"
@@ -53,6 +54,13 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_AON_SYSCON_IDX] = { 0x17010000, 0x10000 },
     [PZ7110_SYS_IOMUX_IDX] = { 0x13040000, 0x10000 },
     [PZ7110_AON_IOMUX_IDX] = { 0x17020000, 0x10000 },
+    [PZ7110_I2C0] = { 0x10030000, 0x10000 },
+    [PZ7110_I2C1] = { 0x10040000, 0x10000 },
+    [PZ7110_I2C2] = { 0x10050000, 0x10000 },
+    [PZ7110_I2C3] = { 0x12030000, 0x10000 },
+    [PZ7110_I2C4] = { 0x12040000, 0x10000 },
+    [PZ7110_I2C5] = { 0x12050000, 0x10000 },
+    [PZ7110_I2C6] = { 0x12060000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
 };
 
@@ -84,62 +92,15 @@ static void pz7110_create_quiet_stub(const char *name, hwaddr base,
     memory_region_add_subregion(get_system_memory(), base, mr);
 }
 
-typedef struct PZ7110DwI2CStubState {
-    uint32_t enable;
-} PZ7110DwI2CStubState;
-
-static uint64_t pz7110_dw_i2c_stub_read(void *opaque, hwaddr addr,
-                                        unsigned int size)
+static void pz7110_create_i2c(hwaddr base, qemu_irq irq, bool eeprom)
 {
-    PZ7110DwI2CStubState *s = opaque;
+    DeviceState *dev = qdev_new(TYPE_PZ7110_I2C);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
 
-    switch (addr) {
-    case 0x34: /* IC_RAW_INTR_STAT */
-        return 0;
-    case 0x6c: /* IC_ENABLE */
-    case 0x9c: /* IC_ENABLE_STATUS */
-        return s->enable;
-    case 0x70: /* IC_STATUS: TX FIFO empty and not full */
-        return BIT(2) | BIT(1);
-    case 0x74: /* IC_TXFLR */
-    case 0x78: /* IC_RXFLR */
-        return 0;
-    case 0xf4: /* IC_COMP_PARAM_1 */
-        return (15 << 0) | (15 << 8) | (2 << 16);
-    case 0xf8: /* IC_COMP_VERSION */
-        return 0x3230312a;
-    case 0xfc: /* IC_COMP_TYPE */
-        return 0x44570140;
-    default:
-        return 0;
-    }
-}
-
-static void pz7110_dw_i2c_stub_write(void *opaque, hwaddr addr, uint64_t value,
-                                     unsigned int size)
-{
-    PZ7110DwI2CStubState *s = opaque;
-
-    if (addr == 0x6c) {
-        s->enable = value & 1;
-    }
-}
-
-static const MemoryRegionOps pz7110_dw_i2c_stub_ops = {
-    .read = pz7110_dw_i2c_stub_read,
-    .write = pz7110_dw_i2c_stub_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid.min_access_size = 4,
-    .valid.max_access_size = 4,
-};
-
-static void pz7110_create_dw_i2c_stub(const char *name, hwaddr base)
-{
-    MemoryRegion *mr = g_new0(MemoryRegion, 1);
-    PZ7110DwI2CStubState *s = g_new0(PZ7110DwI2CStubState, 1);
-
-    memory_region_init_io(mr, NULL, &pz7110_dw_i2c_stub_ops, s, name, 0x10000);
-    memory_region_add_subregion(get_system_memory(), base, mr);
+    qdev_prop_set_bit(dev, "eeprom", eeprom);
+    sysbus_realize_and_unref(sbd, &error_fatal);
+    sysbus_mmio_map(sbd, 0, base);
+    sysbus_connect_irq(sbd, 0, irq);
 }
 
 static DeviceState *pz7110_create_plic(const MemMapEntry *memmap,
@@ -390,13 +351,21 @@ static void pz7110_machine_init(MachineState *machine)
     pz7110_create_quiet_stub("pz7110.qspi", 0x13010000, 0x10000);
     pz7110_create_quiet_stub("pz7110.dmc", 0x15700000, 0x10000);
     pz7110_create_quiet_stub("pz7110.ddr-phy", 0x13000000, 0x10000);
-    pz7110_create_dw_i2c_stub("pz7110.i2c0", 0x10030000);
-    pz7110_create_dw_i2c_stub("pz7110.i2c1", 0x10040000);
-    pz7110_create_dw_i2c_stub("pz7110.i2c2", 0x10050000);
-    pz7110_create_dw_i2c_stub("pz7110.i2c3", 0x12030000);
-    pz7110_create_dw_i2c_stub("pz7110.i2c4", 0x12040000);
-    pz7110_create_dw_i2c_stub("pz7110.i2c5", 0x12050000);
-    pz7110_create_dw_i2c_stub("pz7110.i2c6", 0x12060000);
+
+    pz7110_create_i2c(memmap[PZ7110_I2C0].base,
+                      qdev_get_gpio_in(irqchip, I2C0_IRQ), false);
+    pz7110_create_i2c(memmap[PZ7110_I2C1].base,
+                      qdev_get_gpio_in(irqchip, I2C1_IRQ), false);
+    pz7110_create_i2c(memmap[PZ7110_I2C2].base,
+                      qdev_get_gpio_in(irqchip, I2C2_IRQ), false);
+    pz7110_create_i2c(memmap[PZ7110_I2C3].base,
+                      qdev_get_gpio_in(irqchip, I2C3_IRQ), false);
+    pz7110_create_i2c(memmap[PZ7110_I2C4].base,
+                      qdev_get_gpio_in(irqchip, I2C4_IRQ), false);
+    pz7110_create_i2c(memmap[PZ7110_I2C5].base,
+                      qdev_get_gpio_in(irqchip, I2C5_IRQ), true);
+    pz7110_create_i2c(memmap[PZ7110_I2C6].base,
+                      qdev_get_gpio_in(irqchip, I2C6_IRQ), false);
 
     firmware_name = riscv_default_firmware_name(&s->u_cpus);
     firmware_end_addr = riscv_find_and_load_firmware(machine, firmware_name,
