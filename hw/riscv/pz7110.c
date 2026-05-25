@@ -91,6 +91,52 @@ static const MemoryRegionOps pz7110_quiet_stub_ops = {
     .valid.max_access_size = 8,
 };
 
+static uint64_t pz7110_pmu_read(void *opaque, hwaddr addr, unsigned int size)
+{
+    RISCVPZ7110State *s = opaque;
+
+    switch (addr) {
+    case 0x80: /* CURR_POWER_MODE */
+        return s->pmu_power_mode;
+    case 0x88: /* PMU_EVENT_STATUS */
+    case 0x8c: /* PMU_INT_STATUS */
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+static void pz7110_pmu_write(void *opaque, hwaddr addr, uint64_t value,
+                             unsigned int size)
+{
+    RISCVPZ7110State *s = opaque;
+    uint32_t mask = value;
+
+    switch (addr) {
+    case 0x0c: /* SW_TURN_ON_POWER_MODE */
+        s->pmu_power_mode |= mask;
+        break;
+    case 0x10: /* SW_TURN_OFF_POWER_MODE */
+        s->pmu_power_mode &= ~mask;
+        /*
+         * SYSTOP and CPU domains remain available in the QEMU model.
+         * U-Boot/OpenSBI may touch reset paths after failed probes.
+         */
+        s->pmu_power_mode |= 0x3;
+        break;
+    default:
+        break;
+    }
+}
+
+static const MemoryRegionOps pz7110_pmu_ops = {
+    .read = pz7110_pmu_read,
+    .write = pz7110_pmu_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 4,
+    .valid.max_access_size = 4,
+};
+
 static uint64_t pz7110_qspi_xip_read(void *opaque, hwaddr addr, unsigned size)
 {
     CadenceQSPIState *s = opaque;
@@ -535,6 +581,11 @@ static void pz7110_machine_init(MachineState *machine)
     pz7110_create_ddr_stub("pz7110.dmc", 0x15700000);
     pz7110_create_ddr_stub("pz7110.ddr-phy", 0x13000000);
     pz7110_create_quiet_stub("pz7110.otp", 0x17050000, 0x10000);
+
+    s->pmu_power_mode = 0x3;
+    memory_region_init_io(&s->pmu_mmio, OBJECT(machine), &pz7110_pmu_ops, s,
+                          "pz7110.pmu", 0x10000);
+    memory_region_add_subregion(system_memory, 0x17030000, &s->pmu_mmio);
 
     pz7110_create_i2c(memmap[PZ7110_I2C0].base,
                       qdev_get_gpio_in(irqchip, I2C0_IRQ), false);

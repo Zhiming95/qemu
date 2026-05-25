@@ -38,6 +38,8 @@ struct RISCVPZ7110State {
     PZ7110SdioState sdio0;
     PZ7110SdioState sdio1;
     MemoryRegion ccache_mmio;
+    MemoryRegion pmu_mmio;
+    uint32_t pmu_power_mode;
 };
 
 enum {
