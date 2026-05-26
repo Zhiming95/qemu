@@ -9,6 +9,7 @@
 
 #include "hw/boards.h"
 #include "hw/riscv/pz7110_crg.h"
+#include "hw/riscv/pz7110_gmac.h"
 #include "hw/riscv/pz7110_i2c.h"
 #include "hw/riscv/pz7110_iomux.h"
 #include "hw/riscv/pz7110_sdio.h"
@@ -42,6 +43,8 @@ struct RISCVPZ7110State {
     PZ7110SdioState sdio1;
     PZ7110TimerState timer;
     PZ7110TrngState trng;
+    PZ7110GmacState gmac0;
+    PZ7110GmacState gmac1;
     PZ7110VOUTCRGState vout_crg;
     MemoryRegion ccache_mmio;
     MemoryRegion pmu_mmio;
@@ -75,6 +78,8 @@ enum {
     PZ7110_SDIO1_IDX,
     PZ7110_TIMER_IDX,
     PZ7110_TRNG_IDX,
+    PZ7110_GMAC0_IDX,
+    PZ7110_GMAC1_IDX,
     PZ7110_VOUT_CRG_IDX,
     PZ7110_DRAM,
 };
@@ -96,6 +101,8 @@ enum {
     TIMER2_IRQ = 71,
     TIMER3_IRQ = 72,
     TRNG_IRQ = 30,
+    GMAC0_IRQ = 7,
+    GMAC1_IRQ = 78,
     AON_GPIO_IRQ = 85,
     SYS_GPIO_IRQ = 86,
 };

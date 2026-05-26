@@ -6,6 +6,7 @@ riscv_ss.add(when: 'CONFIG_OPENTITAN', if_true: files('opentitan.c'))
 riscv_ss.add(when: 'CONFIG_PZ7110', if_true: files(
     'pz7110.c',
     'pz7110_crg.c',
+    'pz7110_gmac.c',
     'pz7110_i2c.c',
     'pz7110_syscon.c',
     'pz7110_iomux.c',

@@ -22,6 +22,7 @@
 #include "hw/riscv/riscv_hart.h"
 #include "hw/sd/sd.h"
 #include "hw/sysbus.h"
+#include "net/net.h"
 #include "system/system.h"
 #include "target/riscv/cpu.h"
 #include <libfdt.h>
@@ -71,6 +72,8 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_SDIO1_IDX] = { 0x16020000, 0x10000 },
     [PZ7110_TIMER_IDX] = { 0x13050000, 0x10000 },
     [PZ7110_TRNG_IDX] = { 0x1600c000, 0x4000 },
+    [PZ7110_GMAC0_IDX] = { 0x16030000, 0x10000 },
+    [PZ7110_GMAC1_IDX] = { 0x16040000, 0x10000 },
     [PZ7110_VOUT_CRG_IDX] = { 0x295c0000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
 };
@@ -622,6 +625,26 @@ static void pz7110_machine_init(MachineState *machine)
                     memmap[PZ7110_TRNG_IDX].base);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->trng), 0,
                        qdev_get_gpio_in(irqchip, TRNG_IRQ));
+
+    object_initialize_child(OBJECT(machine), "gmac0", &s->gmac0,
+                            TYPE_PZ7110_GMAC);
+    s->gmac0.phy_addr = 0;
+    qemu_configure_nic_device(DEVICE(&s->gmac0), true, NULL);
+    sysbus_realize(SYS_BUS_DEVICE(&s->gmac0), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->gmac0), 0,
+                    memmap[PZ7110_GMAC0_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->gmac0), 0,
+                       qdev_get_gpio_in(irqchip, GMAC0_IRQ));
+
+    object_initialize_child(OBJECT(machine), "gmac1", &s->gmac1,
+                            TYPE_PZ7110_GMAC);
+    s->gmac1.phy_addr = 1;
+    qemu_configure_nic_device(DEVICE(&s->gmac1), true, NULL);
+    sysbus_realize(SYS_BUS_DEVICE(&s->gmac1), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->gmac1), 0,
+                    memmap[PZ7110_GMAC1_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->gmac1), 0,
+                       qdev_get_gpio_in(irqchip, GMAC1_IRQ));
 
     pz7110_create_i2c(memmap[PZ7110_I2C0].base,
                       qdev_get_gpio_in(irqchip, I2C0_IRQ), false);
