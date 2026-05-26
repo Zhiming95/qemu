@@ -13,6 +13,7 @@
 #include "hw/riscv/pz7110_iomux.h"
 #include "hw/riscv/pz7110_sdio.h"
 #include "hw/riscv/pz7110_syscon.h"
+#include "hw/riscv/pz7110_timer.h"
 #include "hw/riscv/pz7110_vout_crg.h"
 #include "hw/riscv/riscv_hart.h"
 #include "hw/ssi/cadence_qspi.h"
@@ -38,6 +39,7 @@ struct RISCVPZ7110State {
     PZ7110AONIOMUXState aon_iomux;
     PZ7110SdioState sdio0;
     PZ7110SdioState sdio1;
+    PZ7110TimerState timer;
     PZ7110VOUTCRGState vout_crg;
     MemoryRegion ccache_mmio;
     MemoryRegion pmu_mmio;
@@ -69,6 +71,7 @@ enum {
     PZ7110_I2C6,
     PZ7110_SDIO0_IDX,
     PZ7110_SDIO1_IDX,
+    PZ7110_TIMER_IDX,
     PZ7110_VOUT_CRG_IDX,
     PZ7110_DRAM,
 };
@@ -85,6 +88,10 @@ enum {
     I2C6_IRQ = 51,
     SDIO0_IRQ = 74,
     SDIO1_IRQ = 75,
+    TIMER0_IRQ = 69,
+    TIMER1_IRQ = 70,
+    TIMER2_IRQ = 71,
+    TIMER3_IRQ = 72,
     AON_GPIO_IRQ = 85,
     SYS_GPIO_IRQ = 86,
 };

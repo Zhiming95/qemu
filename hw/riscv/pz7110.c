@@ -69,6 +69,7 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_I2C6] = { 0x12060000, 0x10000 },
     [PZ7110_SDIO0_IDX] = { 0x16010000, 0x10000 },
     [PZ7110_SDIO1_IDX] = { 0x16020000, 0x10000 },
+    [PZ7110_TIMER_IDX] = { 0x13050000, 0x10000 },
     [PZ7110_VOUT_CRG_IDX] = { 0x295c0000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
 };
@@ -598,6 +599,20 @@ static void pz7110_machine_init(MachineState *machine)
     sysbus_realize(SYS_BUS_DEVICE(&s->vout_crg), &error_fatal);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->vout_crg), 0,
                     memmap[PZ7110_VOUT_CRG_IDX].base);
+
+    object_initialize_child(OBJECT(machine), "timer", &s->timer,
+                            TYPE_PZ7110_TIMER);
+    sysbus_realize(SYS_BUS_DEVICE(&s->timer), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->timer), 0,
+                    memmap[PZ7110_TIMER_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->timer), 0,
+                       qdev_get_gpio_in(irqchip, TIMER0_IRQ));
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->timer), 1,
+                       qdev_get_gpio_in(irqchip, TIMER1_IRQ));
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->timer), 2,
+                       qdev_get_gpio_in(irqchip, TIMER2_IRQ));
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->timer), 3,
+                       qdev_get_gpio_in(irqchip, TIMER3_IRQ));
 
     pz7110_create_i2c(memmap[PZ7110_I2C0].base,
                       qdev_get_gpio_in(irqchip, I2C0_IRQ), false);
