@@ -12,6 +12,7 @@
 #include "hw/riscv/pz7110_gmac.h"
 #include "hw/riscv/pz7110_i2c.h"
 #include "hw/riscv/pz7110_iomux.h"
+#include "hw/riscv/pz7110_rtc.h"
 #include "hw/riscv/pz7110_sdio.h"
 #include "hw/riscv/pz7110_syscon.h"
 #include "hw/riscv/pz7110_timer.h"
@@ -42,6 +43,7 @@ struct RISCVPZ7110State {
     PZ7110SdioState sdio0;
     PZ7110SdioState sdio1;
     PZ7110TimerState timer;
+    PZ7110RtcState rtc;
     PZ7110TrngState trng;
     PZ7110GmacState gmac0;
     PZ7110GmacState gmac1;
@@ -77,6 +79,7 @@ enum {
     PZ7110_SDIO0_IDX,
     PZ7110_SDIO1_IDX,
     PZ7110_TIMER_IDX,
+    PZ7110_RTC_IDX,
     PZ7110_TRNG_IDX,
     PZ7110_GMAC0_IDX,
     PZ7110_GMAC1_IDX,
@@ -100,6 +103,9 @@ enum {
     TIMER1_IRQ = 70,
     TIMER2_IRQ = 71,
     TIMER3_IRQ = 72,
+    RTC_MS_PULSE_IRQ = 10,
+    RTC_SEC_PULSE_IRQ = 11,
+    RTC_IRQ = 12,
     TRNG_IRQ = 30,
     GMAC0_IRQ = 7,
     GMAC1_IRQ = 78,
