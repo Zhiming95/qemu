@@ -582,6 +582,11 @@ static void pz7110_machine_init(MachineState *machine)
     pz7110_create_ddr_stub("pz7110.dmc", 0x15700000);
     pz7110_create_ddr_stub("pz7110.ddr-phy", 0x13000000);
     pz7110_create_quiet_stub("pz7110.otp", 0x17050000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.hdmi", 0x29590000, 0x4000);
+    pz7110_create_quiet_stub("pz7110.dssctrl", 0x295b0000, 0x1000);
+    pz7110_create_quiet_stub("pz7110.dc8200", 0x29400000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.mipi-dsi", 0x295d0000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.mipi-dphy", 0x295e0000, 0x10000);
 
     s->pmu_power_mode = 0x3;
     memory_region_init_io(&s->pmu_mmio, OBJECT(machine), &pz7110_pmu_ops, s,
