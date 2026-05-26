@@ -70,6 +70,7 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_I2C6] = { 0x12060000, 0x10000 },
     [PZ7110_SDIO0_IDX] = { 0x16010000, 0x10000 },
     [PZ7110_SDIO1_IDX] = { 0x16020000, 0x10000 },
+    [PZ7110_SFCTEMP_IDX] = { 0x120e0000, 0x10000 },
     [PZ7110_TIMER_IDX] = { 0x13050000, 0x10000 },
     [PZ7110_RTC_IDX] = { 0x17040000, 0x10000 },
     [PZ7110_TRNG_IDX] = { 0x1600c000, 0x4000 },
@@ -629,6 +630,14 @@ static void pz7110_machine_init(MachineState *machine)
                        qdev_get_gpio_in(irqchip, RTC_SEC_PULSE_IRQ));
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->rtc), 2,
                        qdev_get_gpio_in(irqchip, RTC_IRQ));
+
+    object_initialize_child(OBJECT(machine), "temp", &s->temp,
+                            TYPE_PZ7110_SFCTEMP);
+    sysbus_realize(SYS_BUS_DEVICE(&s->temp), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->temp), 0,
+                    memmap[PZ7110_SFCTEMP_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->temp), 0,
+                       qdev_get_gpio_in(irqchip, SFCTEMP_IRQ));
 
     object_initialize_child(OBJECT(machine), "trng", &s->trng,
                             TYPE_PZ7110_TRNG);

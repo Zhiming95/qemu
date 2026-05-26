@@ -15,6 +15,7 @@
 #include "hw/riscv/pz7110_rtc.h"
 #include "hw/riscv/pz7110_sdio.h"
 #include "hw/riscv/pz7110_syscon.h"
+#include "hw/riscv/pz7110_sfctemp.h"
 #include "hw/riscv/pz7110_timer.h"
 #include "hw/riscv/pz7110_trng.h"
 #include "hw/riscv/pz7110_vout_crg.h"
@@ -42,6 +43,7 @@ struct RISCVPZ7110State {
     PZ7110AONIOMUXState aon_iomux;
     PZ7110SdioState sdio0;
     PZ7110SdioState sdio1;
+    PZ7110SFCTempState temp;
     PZ7110TimerState timer;
     PZ7110RtcState rtc;
     PZ7110TrngState trng;
@@ -78,6 +80,7 @@ enum {
     PZ7110_I2C6,
     PZ7110_SDIO0_IDX,
     PZ7110_SDIO1_IDX,
+    PZ7110_SFCTEMP_IDX,
     PZ7110_TIMER_IDX,
     PZ7110_RTC_IDX,
     PZ7110_TRNG_IDX,
@@ -99,6 +102,7 @@ enum {
     I2C6_IRQ = 51,
     SDIO0_IRQ = 74,
     SDIO1_IRQ = 75,
+    SFCTEMP_IRQ = 81,
     TIMER0_IRQ = 69,
     TIMER1_IRQ = 70,
     TIMER2_IRQ = 71,
