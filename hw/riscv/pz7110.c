@@ -747,16 +747,12 @@ static void pz7110_machine_init(MachineState *machine)
 
     {
         uint32_t reset_vec[] = {
-            0xf1402573,                  /* csrr   a0, mhartid */
-            0x00100313,                  /* li     t1, 1 */
-            0x00651c63,                  /* bne    a0, t1, park */
             0x00000297,                  /* auipc  t0, 0 */
+            0xf1402573,                  /* csrr   a0, mhartid */
             0x00000613,                  /* li     a2, 0 */
-            0x0242b583,                  /* ld     a1, 36(t0) */
-            0x01c2b283,                  /* ld     t0, 28(t0) */
+            0x0202b583,                  /* ld     a1, 32(t0) */
+            0x0182b283,                  /* ld     t0, 24(t0) */
             0x00028067,                  /* jr     t0 */
-            0x10500073,                  /* park:  wfi */
-            0xffdff06f,                  /* j      park */
             firmware_load_addr,
             firmware_load_addr >> 32,
             spl_fdt_load_addr,
