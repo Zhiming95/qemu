@@ -155,6 +155,25 @@ static const MemoryRegionOps pz7110_pmu_ops = {
     .valid.max_access_size = 4,
 };
 
+static uint64_t pz7110_dw_uart_ext_read(void *opaque, hwaddr addr,
+                                        unsigned int size)
+{
+    return 0;
+}
+
+static void pz7110_dw_uart_ext_write(void *opaque, hwaddr addr,
+                                     uint64_t value, unsigned int size)
+{
+}
+
+static const MemoryRegionOps pz7110_dw_uart_ext_ops = {
+    .read = pz7110_dw_uart_ext_read,
+    .write = pz7110_dw_uart_ext_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 4,
+    .valid.max_access_size = 4,
+};
+
 static uint64_t pz7110_qspi_xip_read(void *opaque, hwaddr addr, unsigned size)
 {
     CadenceQSPIState *s = opaque;
@@ -537,6 +556,17 @@ static void pz7110_machine_init(MachineState *machine)
     serial_mm_init(system_memory, memmap[PZ7110_UART0].base,
                    2, qdev_get_gpio_in(irqchip, UART0_IRQ), 24000000,
                    serial_hd(0), DEVICE_LITTLE_ENDIAN);
+
+    {
+        static MemoryRegion dw_uart0_ext;
+
+        memory_region_init_io(&dw_uart0_ext, OBJECT(machine),
+                              &pz7110_dw_uart_ext_ops, NULL,
+                              "pz7110.dw-uart0-ext", 0x40);
+        memory_region_add_subregion(system_memory,
+                                    memmap[PZ7110_UART0].base + 0xc0,
+                                    &dw_uart0_ext);
+    }
 
     object_initialize_child(OBJECT(machine), "sys-crg", &s->sys_crg,
                             TYPE_PZ7110_SYS_CRG);
