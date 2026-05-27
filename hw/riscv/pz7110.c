@@ -77,6 +77,7 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_GMAC0_IDX] = { 0x16030000, 0x10000 },
     [PZ7110_GMAC1_IDX] = { 0x16040000, 0x10000 },
     [PZ7110_VOUT_CRG_IDX] = { 0x295c0000, 0x10000 },
+    [PZ7110_WDT_IDX] = { 0x13070000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
 };
 
@@ -619,6 +620,13 @@ static void pz7110_machine_init(MachineState *machine)
                        qdev_get_gpio_in(irqchip, TIMER2_IRQ));
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->timer), 3,
                        qdev_get_gpio_in(irqchip, TIMER3_IRQ));
+
+    object_initialize_child(OBJECT(machine), "wdt", &s->wdt, TYPE_PZ7110_WDT);
+    sysbus_realize(SYS_BUS_DEVICE(&s->wdt), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->wdt), 0,
+                    memmap[PZ7110_WDT_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->wdt), 0,
+                       qdev_get_gpio_in(irqchip, WDT_IRQ));
 
     object_initialize_child(OBJECT(machine), "rtc", &s->rtc, TYPE_PZ7110_RTC);
     sysbus_realize(SYS_BUS_DEVICE(&s->rtc), &error_fatal);

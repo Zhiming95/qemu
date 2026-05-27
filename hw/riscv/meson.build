@@ -16,6 +16,7 @@ riscv_ss.add(when: 'CONFIG_PZ7110', if_true: files(
     'pz7110_timer.c',
     'pz7110_trng.c',
     'pz7110_vout_crg.c',
+    'pz7110_wdt.c',
 ))
 riscv_ss.add(when: 'CONFIG_RISCV_VIRT', if_true: files('virt.c'))
 riscv_ss.add(when: 'CONFIG_SHAKTI_C', if_true: files('shakti_c.c'))
