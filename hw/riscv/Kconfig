@@ -46,6 +46,7 @@ config PZ7110
     default y
     depends on RISCV64
     select CADENCE_QSPI
+    select PL022
     select REGISTER
     select RISCV_ACLINT
     select SD

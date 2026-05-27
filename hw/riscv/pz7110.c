@@ -21,6 +21,7 @@
 #include "hw/riscv/pz7110.h"
 #include "hw/riscv/riscv_hart.h"
 #include "hw/sd/sd.h"
+#include "hw/ssi/pl022.h"
 #include "hw/sysbus.h"
 #include "net/net.h"
 #include "system/system.h"
@@ -68,6 +69,13 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_I2C4] = { 0x12040000, 0x10000 },
     [PZ7110_I2C5] = { 0x12050000, 0x10000 },
     [PZ7110_I2C6] = { 0x12060000, 0x10000 },
+    [PZ7110_SPI0] = { 0x10060000, 0x10000 },
+    [PZ7110_SPI1] = { 0x10070000, 0x10000 },
+    [PZ7110_SPI2] = { 0x10080000, 0x10000 },
+    [PZ7110_SPI3] = { 0x12070000, 0x10000 },
+    [PZ7110_SPI4] = { 0x12080000, 0x10000 },
+    [PZ7110_SPI5] = { 0x12090000, 0x10000 },
+    [PZ7110_SPI6] = { 0x120a0000, 0x10000 },
     [PZ7110_SDIO0_IDX] = { 0x16010000, 0x10000 },
     [PZ7110_SDIO1_IDX] = { 0x16020000, 0x10000 },
     [PZ7110_SFCTEMP_IDX] = { 0x120e0000, 0x10000 },
@@ -689,6 +697,21 @@ static void pz7110_machine_init(MachineState *machine)
                       qdev_get_gpio_in(irqchip, I2C5_IRQ), true);
     pz7110_create_i2c(memmap[PZ7110_I2C6].base,
                       qdev_get_gpio_in(irqchip, I2C6_IRQ), false);
+
+    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI0].base,
+                         qdev_get_gpio_in(irqchip, SPI0_IRQ));
+    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI1].base,
+                         qdev_get_gpio_in(irqchip, SPI1_IRQ));
+    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI2].base,
+                         qdev_get_gpio_in(irqchip, SPI2_IRQ));
+    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI3].base,
+                         qdev_get_gpio_in(irqchip, SPI3_IRQ));
+    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI4].base,
+                         qdev_get_gpio_in(irqchip, SPI4_IRQ));
+    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI5].base,
+                         qdev_get_gpio_in(irqchip, SPI5_IRQ));
+    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI6].base,
+                         qdev_get_gpio_in(irqchip, SPI6_IRQ));
 
     object_initialize_child(OBJECT(machine), "sdio0", &s->sdio0,
                             TYPE_PZ7110_SDIO);
