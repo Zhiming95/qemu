@@ -751,6 +751,13 @@ static void pz7110_machine_init(MachineState *machine)
     sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI6].base,
                          qdev_get_gpio_in(irqchip, SPI6_IRQ));
 
+    pz7110_create_quiet_stub("pz7110.tdm", 0x10090000, 0x1000);
+    pz7110_create_quiet_stub("pz7110.i2stx", 0x100c0000, 0x1000);
+    pz7110_create_quiet_stub("pz7110.pdm", 0x100d0000, 0x1000);
+    pz7110_create_quiet_stub("pz7110.i2srx", 0x100e0000, 0x1000);
+    pz7110_create_quiet_stub("pz7110.i2stx-4ch0", 0x120b0000, 0x1000);
+    pz7110_create_quiet_stub("pz7110.i2stx-4ch1", 0x120c0000, 0x1000);
+
     object_initialize_child(OBJECT(machine), "sdio0", &s->sdio0,
                             TYPE_PZ7110_SDIO);
     dinfo = drive_get(IF_SD, 0, 1);
