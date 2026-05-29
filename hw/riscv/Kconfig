@@ -50,6 +50,7 @@ config PZ7110
     select REGISTER
     select RISCV_ACLINT
     select SD
+    select SERIAL_MM
     select SIFIVE_PLIC
 
 config RISCV_VIRT
