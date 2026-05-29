@@ -17,6 +17,7 @@ riscv_ss.add(when: 'CONFIG_PZ7110', if_true: files(
     'pz7110_sfctemp.c',
     'pz7110_timer.c',
     'pz7110_trng.c',
+    'pz7110_usb.c',
     'pz7110_vout_crg.c',
     'pz7110_wdt.c',
 ))

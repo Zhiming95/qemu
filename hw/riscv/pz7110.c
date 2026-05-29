@@ -86,6 +86,7 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_GMAC1_IDX] = { 0x16040000, 0x10000 },
     [PZ7110_DMA_IDX] = { 0x16050000, 0x10000 },
     [PZ7110_PWM_IDX] = { 0x120d0000, 0x10000 },
+    [PZ7110_USB_IDX] = { 0x10100000, 0x100000 },
     [PZ7110_VOUT_CRG_IDX] = { 0x295c0000, 0x10000 },
     [PZ7110_WDT_IDX] = { 0x13070000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
@@ -780,6 +781,14 @@ static void pz7110_machine_init(MachineState *machine)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->pwm), 0,
                     memmap[PZ7110_PWM_IDX].base);
 
+    object_initialize_child(OBJECT(machine), "pz7110-usb", &s->usb,
+                            TYPE_PZ7110_USB);
+    sysbus_realize(SYS_BUS_DEVICE(&s->usb), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->usb), 0,
+                    memmap[PZ7110_USB_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->usb), 0,
+                       qdev_get_gpio_in(irqchip, USB_IRQ));
+
     pz7110_create_i2c(memmap[PZ7110_I2C0].base,
                       qdev_get_gpio_in(irqchip, I2C0_IRQ), false);
     pz7110_create_i2c(memmap[PZ7110_I2C1].base,
@@ -816,6 +825,9 @@ static void pz7110_machine_init(MachineState *machine)
     pz7110_create_quiet_stub("pz7110.i2srx", 0x100e0000, 0x1000);
     pz7110_create_quiet_stub("pz7110.i2stx-4ch0", 0x120b0000, 0x1000);
     pz7110_create_quiet_stub("pz7110.i2stx-4ch1", 0x120c0000, 0x1000);
+    pz7110_create_quiet_stub("pz7110.usb3-phy", 0x10200000, 0x1000);
+    pz7110_create_quiet_stub("pz7110.phyctrl0", 0x10210000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.phyctrl1", 0x10220000, 0x10000);
 
     object_initialize_child(OBJECT(machine), "sdio0", &s->sdio0,
                             TYPE_PZ7110_SDIO);

@@ -20,6 +20,7 @@
 #include "hw/riscv/pz7110_sfctemp.h"
 #include "hw/riscv/pz7110_timer.h"
 #include "hw/riscv/pz7110_trng.h"
+#include "hw/riscv/pz7110_usb.h"
 #include "hw/riscv/pz7110_vout_crg.h"
 #include "hw/riscv/pz7110_wdt.h"
 #include "hw/riscv/riscv_hart.h"
@@ -54,6 +55,7 @@ struct RISCVPZ7110State {
     PZ7110GmacState gmac1;
     PZ7110DmaState dma;
     PZ7110PwmState pwm;
+    PZ7110UsbState usb;
     PZ7110VOUTCRGState vout_crg;
     PZ7110WdtState wdt;
     MemoryRegion ccache_mmio;
@@ -101,6 +103,7 @@ enum {
     PZ7110_GMAC1_IDX,
     PZ7110_DMA_IDX,
     PZ7110_PWM_IDX,
+    PZ7110_USB_IDX,
     PZ7110_VOUT_CRG_IDX,
     PZ7110_WDT_IDX,
     PZ7110_DRAM,
@@ -135,6 +138,9 @@ enum {
     RTC_IRQ = 12,
     CRYPTO_IRQ = 28,
     TRNG_IRQ = 30,
+    USB_IRQ = 100,
+    USB_PERIPHERAL_IRQ = 108,
+    USB_OTG_IRQ = 110,
     GMAC0_IRQ = 7,
     GMAC1_IRQ = 78,
     DMA_IRQ = 73,
