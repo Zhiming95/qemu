@@ -87,6 +87,10 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_DMA_IDX] = { 0x16050000, 0x10000 },
     [PZ7110_PWM_IDX] = { 0x120d0000, 0x10000 },
     [PZ7110_USB_IDX] = { 0x10100000, 0x100000 },
+    [PZ7110_PCIE0_APB_IDX] = { 0x2b000000, 0x100000 },
+    [PZ7110_PCIE0_CFG_IDX] = { 0x940000000, 0x1000000 },
+    [PZ7110_PCIE1_APB_IDX] = { 0x2c000000, 0x100000 },
+    [PZ7110_PCIE1_CFG_IDX] = { 0x9c0000000, 0x1000000 },
     [PZ7110_VOUT_CRG_IDX] = { 0x295c0000, 0x10000 },
     [PZ7110_WDT_IDX] = { 0x13070000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
@@ -788,6 +792,26 @@ static void pz7110_machine_init(MachineState *machine)
                     memmap[PZ7110_USB_IDX].base);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->usb), 0,
                        qdev_get_gpio_in(irqchip, USB_IRQ));
+
+    object_initialize_child(OBJECT(machine), "pcie0", &s->pcie0,
+                            TYPE_PZ7110_PCIE);
+    sysbus_realize(SYS_BUS_DEVICE(&s->pcie0), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie0), 0,
+                    memmap[PZ7110_PCIE0_APB_IDX].base);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie0), 1,
+                    memmap[PZ7110_PCIE0_CFG_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->pcie0), 0,
+                       qdev_get_gpio_in(irqchip, PCIE0_IRQ));
+
+    object_initialize_child(OBJECT(machine), "pcie1", &s->pcie1,
+                            TYPE_PZ7110_PCIE);
+    sysbus_realize(SYS_BUS_DEVICE(&s->pcie1), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie1), 0,
+                    memmap[PZ7110_PCIE1_APB_IDX].base);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie1), 1,
+                    memmap[PZ7110_PCIE1_CFG_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->pcie1), 0,
+                       qdev_get_gpio_in(irqchip, PCIE1_IRQ));
 
     pz7110_create_i2c(memmap[PZ7110_I2C0].base,
                       qdev_get_gpio_in(irqchip, I2C0_IRQ), false);

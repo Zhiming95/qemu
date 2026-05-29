@@ -9,6 +9,7 @@ riscv_ss.add(when: 'CONFIG_PZ7110', if_true: files(
     'pz7110_dma.c',
     'pz7110_gmac.c',
     'pz7110_i2c.c',
+    'pz7110_pcie.c',
     'pz7110_syscon.c',
     'pz7110_iomux.c',
     'pz7110_pwm.c',
