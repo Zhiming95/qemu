@@ -13,6 +13,7 @@
 #include "hw/riscv/pz7110_gmac.h"
 #include "hw/riscv/pz7110_i2c.h"
 #include "hw/riscv/pz7110_iomux.h"
+#include "hw/riscv/pz7110_pwm.h"
 #include "hw/riscv/pz7110_rtc.h"
 #include "hw/riscv/pz7110_sdio.h"
 #include "hw/riscv/pz7110_syscon.h"
@@ -52,6 +53,7 @@ struct RISCVPZ7110State {
     PZ7110GmacState gmac0;
     PZ7110GmacState gmac1;
     PZ7110DmaState dma;
+    PZ7110PwmState pwm;
     PZ7110VOUTCRGState vout_crg;
     PZ7110WdtState wdt;
     MemoryRegion ccache_mmio;
@@ -98,6 +100,7 @@ enum {
     PZ7110_GMAC0_IDX,
     PZ7110_GMAC1_IDX,
     PZ7110_DMA_IDX,
+    PZ7110_PWM_IDX,
     PZ7110_VOUT_CRG_IDX,
     PZ7110_WDT_IDX,
     PZ7110_DRAM,
