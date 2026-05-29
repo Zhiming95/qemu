@@ -130,6 +130,7 @@ enum {
     RTC_MS_PULSE_IRQ = 10,
     RTC_SEC_PULSE_IRQ = 11,
     RTC_IRQ = 12,
+    CRYPTO_IRQ = 28,
     TRNG_IRQ = 30,
     GMAC0_IRQ = 7,
     GMAC1_IRQ = 78,
