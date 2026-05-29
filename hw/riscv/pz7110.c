@@ -327,12 +327,38 @@ static const MemoryRegionOps pz7110_ddr_stub_ops = {
 
 static uint64_t pz7110_ccache_read(void *opaque, hwaddr addr, unsigned size)
 {
-    return 0;
+    RISCVPZ7110State *s = opaque;
+
+    switch (addr) {
+    case 0x00: /* CONFIG: 1 bank, 16 ways, 2048 sets, 64-byte lines */
+        return 0x060b1001;
+    case 0x08: /* WAYENABLE: index of the largest enabled way */
+        return s->ccache_wayenable;
+    case 0x108: /* DirError correctable count */
+    case 0x128: /* DirError uncorrectable count */
+    case 0x148: /* DataError correctable count */
+    case 0x168: /* DataError uncorrectable count */
+        return 0;
+    default:
+        return 0;
+    }
 }
 
 static void pz7110_ccache_write(void *opaque, hwaddr addr, uint64_t value,
                                 unsigned size)
 {
+    RISCVPZ7110State *s = opaque;
+
+    switch (addr) {
+    case 0x08: /* WAYENABLE */
+        s->ccache_wayenable = value & 0xf;
+        break;
+    case 0x200: /* FLUSH64 */
+    case 0x240: /* FLUSH32 */
+        break;
+    default:
+        break;
+    }
 }
 
 static const MemoryRegionOps pz7110_ccache_ops = {
@@ -568,6 +594,7 @@ static void pz7110_machine_init(MachineState *machine)
     memory_region_add_subregion(system_memory, memmap[PZ7110_QSPI_XIP].base,
                                 xip);
 
+    s->ccache_wayenable = 0xf;
     memory_region_init_io(&s->ccache_mmio, OBJECT(machine),
                           &pz7110_ccache_ops, s, "pz7110.ccache", 0x40000);
     memory_region_add_subregion(system_memory, 0x02010000, &s->ccache_mmio);

@@ -62,6 +62,7 @@ struct RISCVPZ7110State {
     PZ7110VOUTCRGState vout_crg;
     PZ7110WdtState wdt;
     MemoryRegion ccache_mmio;
+    uint32_t ccache_wayenable;
     MemoryRegion pmu_mmio;
     uint32_t pmu_power_mode;
 };
