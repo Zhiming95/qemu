@@ -13,6 +13,7 @@
 #include "hw/irq.h"
 #include "hw/qdev-core.h"
 #include "net/net.h"
+#include "net/checksum.h"
 #include "qapi/error.h"
 #include "migration/vmstate.h"
 #include "system/dma.h"
@@ -31,9 +32,24 @@
 
 static void pz7110_gmac_update_irq(PZ7110GmacState *s)
 {
-    bool level = (s->chan_status & s->chan_int_en &
-                  (DMA_ST_TI | DMA_ST_RI)) &&
-                 (s->chan_status & s->chan_int_en & DMA_ST_NIS);
+    bool normal_enabled;
+    bool tx_enabled;
+    bool rx_enabled;
+    bool level;
+
+    /*
+     * DWMAC4 channel status and interrupt-enable bits are not laid out as
+     * identical masks: status.NIS is bit 15, while DWMAC4 enable.NIE is
+     * bit 16.  Some later revisions use bit 15 for NIE, so accept both.
+     */
+    normal_enabled = (s->chan_status & DMA_ST_NIS) &&
+                     (s->chan_int_en & (DMA_IE_NIE | DMA_IE_NIE_4_10));
+    tx_enabled = (s->chan_status & DMA_ST_TI) &&
+                 (s->chan_int_en & DMA_IE_TIE);
+    rx_enabled = (s->chan_status & DMA_ST_RI) &&
+                 (s->chan_int_en & DMA_IE_RIE);
+    level = normal_enabled && (tx_enabled || rx_enabled);
+
     qemu_set_irq(s->irq, level);
 }
 
@@ -145,6 +161,7 @@ static void pz7110_gmac_try_tx(PZ7110GmacState *s)
 
         if (last) {
             if (frame_len) {
+                net_checksum_calculate(frame, frame_len, CSUM_ALL);
                 qemu_send_packet(qemu_get_queue(s->nic), frame, frame_len);
             }
             return;
@@ -300,11 +317,11 @@ static void pz7110_gmac_write(void *opaque, hwaddr addr, uint64_t val64,
                         case 1: /* BMSR */
                             s->mii_data = 0x786D;
                             break;
-                        case 2: /* PHYID1: Marvell 88E1111 */
-                            s->mii_data = 0x0141;
+                        case 2: /* PHYID1: valid, unmatched Clause 22 PHY */
+                            s->mii_data = 0x1234;
                             break;
                         case 3: /* PHYID2 */
-                            s->mii_data = 0x0cc0;
+                            s->mii_data = 0x5678;
                             break;
                         case 4: /* ANAR */
                             s->mii_data = s->phy_anar;

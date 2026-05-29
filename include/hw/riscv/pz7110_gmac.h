@@ -72,6 +72,14 @@ OBJECT_DECLARE_SIMPLE_TYPE(PZ7110GmacState, PZ7110_GMAC)
 #define DMA_ST_NIS   BIT(15)  /* Normal interrupt summary */
 #define DMA_ST_AIS   BIT(14)  /* Abnormal interrupt summary */
 
+/* DMA channel interrupt-enable bits */
+#define DMA_IE_NIE      BIT(16) /* Normal interrupt enable, DWMAC4 */
+#define DMA_IE_AIE      BIT(15) /* Abnormal interrupt enable, DWMAC4 */
+#define DMA_IE_NIE_4_10 BIT(15) /* Normal interrupt enable, DWMAC4.10+ */
+#define DMA_IE_AIE_4_10 BIT(14) /* Abnormal interrupt enable, DWMAC4.10+ */
+#define DMA_IE_RIE      BIT(6)
+#define DMA_IE_TIE      BIT(0)
+
 /* DMA control bits (TX_CTL / RX_CTL / CHAN_CTRL) */
 #define DMA_CTL_ST   BIT(0)   /* Start/stop TX */
 #define DMA_CTL_SR   BIT(0)   /* Start/stop RX */
