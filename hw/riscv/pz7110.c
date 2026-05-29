@@ -91,6 +91,9 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_PCIE0_CFG_IDX] = { 0x940000000, 0x1000000 },
     [PZ7110_PCIE1_APB_IDX] = { 0x2c000000, 0x100000 },
     [PZ7110_PCIE1_CFG_IDX] = { 0x9c0000000, 0x1000000 },
+    [PZ7110_MAILBOX_IDX] = { 0x13060000, 0x1000 },
+    [PZ7110_CAN0_IDX] = { 0x130d0000, 0x1000 },
+    [PZ7110_CAN1_IDX] = { 0x130e0000, 0x1000 },
     [PZ7110_VOUT_CRG_IDX] = { 0x295c0000, 0x10000 },
     [PZ7110_WDT_IDX] = { 0x13070000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
@@ -852,6 +855,13 @@ static void pz7110_machine_init(MachineState *machine)
     pz7110_create_quiet_stub("pz7110.usb3-phy", 0x10200000, 0x1000);
     pz7110_create_quiet_stub("pz7110.phyctrl0", 0x10210000, 0x10000);
     pz7110_create_quiet_stub("pz7110.phyctrl1", 0x10220000, 0x10000);
+    pz7110_create_quiet_stub("pz7110.mailbox",
+                             memmap[PZ7110_MAILBOX_IDX].base,
+                             memmap[PZ7110_MAILBOX_IDX].size);
+    pz7110_create_quiet_stub("pz7110.can0", memmap[PZ7110_CAN0_IDX].base,
+                             memmap[PZ7110_CAN0_IDX].size);
+    pz7110_create_quiet_stub("pz7110.can1", memmap[PZ7110_CAN1_IDX].base,
+                             memmap[PZ7110_CAN1_IDX].size);
 
     object_initialize_child(OBJECT(machine), "sdio0", &s->sdio0,
                             TYPE_PZ7110_SDIO);
