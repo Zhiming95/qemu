@@ -14,6 +14,7 @@
 #include "hw/riscv/pz7110_i2c.h"
 #include "hw/riscv/pz7110_iomux.h"
 #include "hw/riscv/pz7110_pcie.h"
+#include "hw/riscv/pz7110_pmu.h"
 #include "hw/riscv/pz7110_pwm.h"
 #include "hw/riscv/pz7110_rtc.h"
 #include "hw/riscv/pz7110_sdio.h"
@@ -59,12 +60,11 @@ struct RISCVPZ7110State {
     PZ7110UsbState usb;
     PZ7110PcieState pcie0;
     PZ7110PcieState pcie1;
+    PZ7110PmuState pmu;
     PZ7110VOUTCRGState vout_crg;
     PZ7110WdtState wdt;
     MemoryRegion ccache_mmio;
     uint32_t ccache_wayenable;
-    MemoryRegion pmu_mmio;
-    uint32_t pmu_power_mode;
 };
 
 enum {
@@ -115,6 +115,7 @@ enum {
     PZ7110_MAILBOX_IDX,
     PZ7110_CAN0_IDX,
     PZ7110_CAN1_IDX,
+    PZ7110_PMU_IDX,
     PZ7110_VOUT_CRG_IDX,
     PZ7110_WDT_IDX,
     PZ7110_DRAM,
@@ -152,6 +153,7 @@ enum {
     USB_IRQ = 100,
     USB_PERIPHERAL_IRQ = 108,
     USB_OTG_IRQ = 110,
+    PMU_IRQ = 111,
     PCIE0_IRQ = 56,
     PCIE1_IRQ = 57,
     GMAC0_IRQ = 7,

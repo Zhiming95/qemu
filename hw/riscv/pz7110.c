@@ -94,6 +94,7 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_MAILBOX_IDX] = { 0x13060000, 0x1000 },
     [PZ7110_CAN0_IDX] = { 0x130d0000, 0x1000 },
     [PZ7110_CAN1_IDX] = { 0x130e0000, 0x1000 },
+    [PZ7110_PMU_IDX] = { 0x17030000, 0x10000 },
     [PZ7110_VOUT_CRG_IDX] = { 0x295c0000, 0x10000 },
     [PZ7110_WDT_IDX] = { 0x13070000, 0x10000 },
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
@@ -116,52 +117,6 @@ static const MemoryRegionOps pz7110_quiet_stub_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid.min_access_size = 1,
     .valid.max_access_size = 8,
-};
-
-static uint64_t pz7110_pmu_read(void *opaque, hwaddr addr, unsigned int size)
-{
-    RISCVPZ7110State *s = opaque;
-
-    switch (addr) {
-    case 0x80: /* CURR_POWER_MODE */
-        return s->pmu_power_mode;
-    case 0x88: /* PMU_EVENT_STATUS */
-    case 0x8c: /* PMU_INT_STATUS */
-        return 0;
-    default:
-        return 0;
-    }
-}
-
-static void pz7110_pmu_write(void *opaque, hwaddr addr, uint64_t value,
-                             unsigned int size)
-{
-    RISCVPZ7110State *s = opaque;
-    uint32_t mask = value;
-
-    switch (addr) {
-    case 0x0c: /* SW_TURN_ON_POWER_MODE */
-        s->pmu_power_mode |= mask;
-        break;
-    case 0x10: /* SW_TURN_OFF_POWER_MODE */
-        s->pmu_power_mode &= ~mask;
-        /*
-         * SYSTOP and CPU domains remain available in the QEMU model.
-         * U-Boot/OpenSBI may touch reset paths after failed probes.
-         */
-        s->pmu_power_mode |= 0x3;
-        break;
-    default:
-        break;
-    }
-}
-
-static const MemoryRegionOps pz7110_pmu_ops = {
-    .read = pz7110_pmu_read,
-    .write = pz7110_pmu_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid.min_access_size = 4,
-    .valid.max_access_size = 4,
 };
 
 static uint64_t pz7110_dw_uart_ext_read(void *opaque, hwaddr addr,
@@ -712,10 +667,12 @@ static void pz7110_machine_init(MachineState *machine)
     pz7110_create_quiet_stub("pz7110.mipi-dsi", 0x295d0000, 0x10000);
     pz7110_create_quiet_stub("pz7110.mipi-dphy", 0x295e0000, 0x10000);
 
-    s->pmu_power_mode = 0x3;
-    memory_region_init_io(&s->pmu_mmio, OBJECT(machine), &pz7110_pmu_ops, s,
-                          "pz7110.pmu", 0x10000);
-    memory_region_add_subregion(system_memory, 0x17030000, &s->pmu_mmio);
+    object_initialize_child(OBJECT(machine), "pmu", &s->pmu, TYPE_PZ7110_PMU);
+    sysbus_realize(SYS_BUS_DEVICE(&s->pmu), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pmu), 0,
+                    memmap[PZ7110_PMU_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->pmu), 0,
+                       qdev_get_gpio_in(irqchip, PMU_IRQ));
 
     object_initialize_child(OBJECT(machine), "vout-crg", &s->vout_crg,
                             TYPE_PZ7110_VOUT_CRG);
