@@ -51,6 +51,7 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_MROM] = { 0x2a000000, 0x10000 },
     [PZ7110_SRAM] = { 0x08000000, 0x200000 },
     [PZ7110_CLINT] = { 0x02000000, 0x10000 },
+    [PZ7110_CCACHE_IDX] = { 0x02010000, 0x40000 },
     [PZ7110_PLIC] = { 0x0c000000, PZ7110_PLIC_SIZE },
     [PZ7110_UART0] = { 0x10000000, 0x10000 },
     [PZ7110_QSPI0] = { 0x13010000, 0x10000 },
@@ -193,52 +194,6 @@ static const MemoryRegionOps pz7110_qspi_xip_ops = {
     },
     .impl = {
         .min_access_size = 1,
-        .max_access_size = 8,
-    },
-};
-
-static uint64_t pz7110_ccache_read(void *opaque, hwaddr addr, unsigned size)
-{
-    RISCVPZ7110State *s = opaque;
-
-    switch (addr) {
-    case 0x00: /* CONFIG: 1 bank, 16 ways, 2048 sets, 64-byte lines */
-        return 0x060b1001;
-    case 0x08: /* WAYENABLE: index of the largest enabled way */
-        return s->ccache_wayenable;
-    case 0x108: /* DirError correctable count */
-    case 0x128: /* DirError uncorrectable count */
-    case 0x148: /* DataError correctable count */
-    case 0x168: /* DataError uncorrectable count */
-        return 0;
-    default:
-        return 0;
-    }
-}
-
-static void pz7110_ccache_write(void *opaque, hwaddr addr, uint64_t value,
-                                unsigned size)
-{
-    RISCVPZ7110State *s = opaque;
-
-    switch (addr) {
-    case 0x08: /* WAYENABLE */
-        s->ccache_wayenable = value & 0xf;
-        break;
-    case 0x200: /* FLUSH64 */
-    case 0x240: /* FLUSH32 */
-        break;
-    default:
-        break;
-    }
-}
-
-static const MemoryRegionOps pz7110_ccache_ops = {
-    .read = pz7110_ccache_read,
-    .write = pz7110_ccache_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid = {
-        .min_access_size = 4,
         .max_access_size = 8,
     },
 };
@@ -457,10 +412,11 @@ static void pz7110_machine_init(MachineState *machine)
     memory_region_add_subregion(system_memory, memmap[PZ7110_QSPI_XIP].base,
                                 xip);
 
-    s->ccache_wayenable = 0xf;
-    memory_region_init_io(&s->ccache_mmio, OBJECT(machine),
-                          &pz7110_ccache_ops, s, "pz7110.ccache", 0x40000);
-    memory_region_add_subregion(system_memory, 0x02010000, &s->ccache_mmio);
+    object_initialize_child(OBJECT(machine), "ccache", &s->ccache,
+                            TYPE_PZ7110_CCACHE);
+    sysbus_realize(SYS_BUS_DEVICE(&s->ccache), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->ccache), 0,
+                    memmap[PZ7110_CCACHE_IDX].base);
 
     dinfo = drive_get(IF_MTD, 0, 0);
     if (dinfo) {

@@ -8,6 +8,7 @@
 #define HW_RISCV_PZ7110_H
 
 #include "hw/boards.h"
+#include "hw/riscv/pz7110_ccache.h"
 #include "hw/riscv/pz7110_crypto.h"
 #include "hw/riscv/pz7110_crg.h"
 #include "hw/riscv/pz7110_dma.h"
@@ -40,6 +41,7 @@ struct RISCVPZ7110State {
     RISCVHartArrayState e_cpus;
     RISCVHartArrayState u_cpus;
     CadenceQSPIState qspi;
+    PZ7110CcacheState ccache;
     PZ7110CryptoState crypto;
     PZ7110SYSCRGState sys_crg;
     PZ7110STGCRGState stg_crg;
@@ -65,14 +67,13 @@ struct RISCVPZ7110State {
     PZ7110PmuState pmu;
     PZ7110VOUTCRGState vout_crg;
     PZ7110WdtState wdt;
-    MemoryRegion ccache_mmio;
-    uint32_t ccache_wayenable;
 };
 
 enum {
     PZ7110_MROM,
     PZ7110_SRAM,
     PZ7110_CLINT,
+    PZ7110_CCACHE_IDX,
     PZ7110_PLIC,
     PZ7110_UART0,
     PZ7110_QSPI0,
