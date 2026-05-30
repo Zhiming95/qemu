@@ -19,6 +19,7 @@
 #include "hw/qdev-properties.h"
 #include "hw/riscv/boot.h"
 #include "hw/riscv/pz7110.h"
+#include "hw/riscv/pz7110_ddr_stub.h"
 #include "hw/riscv/riscv_hart.h"
 #include "hw/sd/sd.h"
 #include "hw/ssi/pl022.h"
@@ -196,51 +197,6 @@ static const MemoryRegionOps pz7110_qspi_xip_ops = {
     },
 };
 
-typedef struct PZ7110DdrStubState {
-    uint32_t regs[0x10000 / 4];
-    unsigned status518_reads;
-} PZ7110DdrStubState;
-
-static uint64_t pz7110_ddr_stub_read(void *opaque, hwaddr addr, unsigned size)
-{
-    PZ7110DdrStubState *s = opaque;
-
-    switch (addr) {
-    case 0x504:
-        return 0x80000000;
-    case 0x518:
-        return s->status518_reads++ == 0 ? 0x2 : 0x0;
-    default:
-        if (addr + size <= sizeof(s->regs)) {
-            return s->regs[addr >> 2];
-        }
-        return 0;
-    }
-}
-
-static void pz7110_ddr_stub_write(void *opaque, hwaddr addr, uint64_t value,
-                                  unsigned size)
-{
-    PZ7110DdrStubState *s = opaque;
-
-    if (addr == 0x514) {
-        s->status518_reads = 0;
-    }
-    if (addr + size <= sizeof(s->regs)) {
-        s->regs[addr >> 2] = value;
-    }
-}
-
-static const MemoryRegionOps pz7110_ddr_stub_ops = {
-    .read = pz7110_ddr_stub_read,
-    .write = pz7110_ddr_stub_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid = {
-        .min_access_size = 4,
-        .max_access_size = 4,
-    },
-};
-
 static uint64_t pz7110_ccache_read(void *opaque, hwaddr addr, unsigned size)
 {
     RISCVPZ7110State *s = opaque;
@@ -293,15 +249,6 @@ static void pz7110_create_quiet_stub(const char *name, hwaddr base,
     MemoryRegion *mr = g_new0(MemoryRegion, 1);
 
     memory_region_init_io(mr, NULL, &pz7110_quiet_stub_ops, NULL, name, size);
-    memory_region_add_subregion(get_system_memory(), base, mr);
-}
-
-static void pz7110_create_ddr_stub(const char *name, hwaddr base)
-{
-    MemoryRegion *mr = g_new0(MemoryRegion, 1);
-    PZ7110DdrStubState *s = g_new0(PZ7110DdrStubState, 1);
-
-    memory_region_init_io(mr, NULL, &pz7110_ddr_stub_ops, s, name, 0x10000);
     memory_region_add_subregion(get_system_memory(), base, mr);
 }
 
