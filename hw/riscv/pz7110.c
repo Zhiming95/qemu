@@ -82,6 +82,8 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_TIMER_IDX] = { 0x13050000, 0x10000 },
     [PZ7110_RTC_IDX] = { 0x17040000, 0x10000 },
     [PZ7110_TRNG_IDX] = { 0x1600c000, 0x4000 },
+    [PZ7110_CRYPTO_IDX] = { 0x16000000, 0x4000 },
+    [PZ7110_SEC_DMA_IDX] = { 0x16008000, 0x4000 },
     [PZ7110_GMAC0_IDX] = { 0x16030000, 0x10000 },
     [PZ7110_GMAC1_IDX] = { 0x16040000, 0x10000 },
     [PZ7110_DMA_IDX] = { 0x16050000, 0x10000 },
@@ -133,47 +135,6 @@ static void pz7110_dw_uart_ext_write(void *opaque, hwaddr addr,
 static const MemoryRegionOps pz7110_dw_uart_ext_ops = {
     .read = pz7110_dw_uart_ext_read,
     .write = pz7110_dw_uart_ext_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid.min_access_size = 4,
-    .valid.max_access_size = 4,
-};
-
-#define JH7110_CRYPTO_CACR 0x400
-#define JH7110_CRYPTO_CASR 0x404
-
-#define CRYPTO_CACR_START BIT(0)
-#define CRYPTO_CACR_IE    BIT(2)
-#define CRYPTO_CASR_DONE  BIT(0)
-
-typedef struct PZ7110CryptoStubState {
-    qemu_irq secirq;
-} PZ7110CryptoStubState;
-
-static uint64_t pz7110_crypto_read(void *opaque, hwaddr addr, unsigned int size)
-{
-    switch (addr) {
-    case JH7110_CRYPTO_CASR:
-        return CRYPTO_CASR_DONE;
-    default:
-        return 0;
-    }
-}
-
-static void pz7110_crypto_write(void *opaque, hwaddr addr, uint64_t value,
-                                unsigned int size)
-{
-    PZ7110CryptoStubState *s = opaque;
-
-    if (addr == JH7110_CRYPTO_CACR &&
-        (value & CRYPTO_CACR_START) &&
-        (value & CRYPTO_CACR_IE)) {
-        qemu_irq_pulse(s->secirq);
-    }
-}
-
-static const MemoryRegionOps pz7110_crypto_ops = {
-    .read = pz7110_crypto_read,
-    .write = pz7110_crypto_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid.min_access_size = 4,
     .valid.max_access_size = 4,
@@ -728,17 +689,18 @@ static void pz7110_machine_init(MachineState *machine)
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->trng), 0,
                        qdev_get_gpio_in(irqchip, TRNG_IRQ));
 
-    {
-        static PZ7110CryptoStubState crypto_state;
-        static MemoryRegion crypto_mr;
-
-        crypto_state.secirq = qdev_get_gpio_in(irqchip, CRYPTO_IRQ);
-        memory_region_init_io(&crypto_mr, OBJECT(machine),
-                              &pz7110_crypto_ops, &crypto_state,
-                              "pz7110.crypto", 0x4000);
-        memory_region_add_subregion(system_memory, 0x16000000, &crypto_mr);
-    }
-    pz7110_create_quiet_stub("pz7110.sec-dma", 0x16008000, 0x4000);
+    object_initialize_child(OBJECT(machine), "crypto", &s->crypto,
+                            TYPE_PZ7110_CRYPTO);
+    sysbus_realize(SYS_BUS_DEVICE(&s->crypto), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->crypto), 0,
+                    memmap[PZ7110_CRYPTO_IDX].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->crypto), 0,
+                       qdev_get_gpio_in(irqchip, CRYPTO_IRQ));
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->crypto), 1,
+                       qdev_get_gpio_in(irqchip, CRYPTO_DMA_IRQ));
+    pz7110_create_quiet_stub("pz7110.sec-dma",
+                             memmap[PZ7110_SEC_DMA_IDX].base,
+                             memmap[PZ7110_SEC_DMA_IDX].size);
 
     object_initialize_child(OBJECT(machine), "gmac0", &s->gmac0,
                             TYPE_PZ7110_GMAC);

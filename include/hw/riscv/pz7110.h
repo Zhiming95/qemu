@@ -8,6 +8,7 @@
 #define HW_RISCV_PZ7110_H
 
 #include "hw/boards.h"
+#include "hw/riscv/pz7110_crypto.h"
 #include "hw/riscv/pz7110_crg.h"
 #include "hw/riscv/pz7110_dma.h"
 #include "hw/riscv/pz7110_gmac.h"
@@ -39,6 +40,7 @@ struct RISCVPZ7110State {
     RISCVHartArrayState e_cpus;
     RISCVHartArrayState u_cpus;
     CadenceQSPIState qspi;
+    PZ7110CryptoState crypto;
     PZ7110SYSCRGState sys_crg;
     PZ7110STGCRGState stg_crg;
     PZ7110AONCRGState aon_crg;
@@ -103,6 +105,8 @@ enum {
     PZ7110_TIMER_IDX,
     PZ7110_RTC_IDX,
     PZ7110_TRNG_IDX,
+    PZ7110_CRYPTO_IDX,
+    PZ7110_SEC_DMA_IDX,
     PZ7110_GMAC0_IDX,
     PZ7110_GMAC1_IDX,
     PZ7110_DMA_IDX,
@@ -149,6 +153,7 @@ enum {
     RTC_SEC_PULSE_IRQ = 11,
     RTC_IRQ = 12,
     CRYPTO_IRQ = 28,
+    CRYPTO_DMA_IRQ = 29,
     TRNG_IRQ = 30,
     USB_IRQ = 100,
     USB_PERIPHERAL_IRQ = 108,
