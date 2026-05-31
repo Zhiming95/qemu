@@ -5,6 +5,7 @@ riscv_ss.add(files('riscv_hart.c'))
 riscv_ss.add(when: 'CONFIG_OPENTITAN', if_true: files('opentitan.c'))
 riscv_ss.add(when: 'CONFIG_PZ7110', if_true: files(
     'pz7110.c',
+    'pz7110_soc.c',
     'pz7110_ccache.c',
     'pz7110_crypto.c',
     'pz7110_crg.c',

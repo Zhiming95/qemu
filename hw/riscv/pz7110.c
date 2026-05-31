@@ -12,40 +12,16 @@
 #include "system/block-backend-io.h"
 #include "system/blockdev.h"
 #include "hw/boards.h"
-#include "hw/char/serial-mm.h"
-#include "hw/intc/riscv_aclint.h"
-#include "hw/intc/sifive_plic.h"
 #include "hw/loader.h"
 #include "hw/qdev-properties.h"
 #include "hw/riscv/boot.h"
 #include "hw/riscv/pz7110.h"
-#include "hw/riscv/pz7110_ddr_stub.h"
+#include "hw/riscv/pz7110_soc.h"
 #include "hw/riscv/riscv_hart.h"
-#include "hw/sd/sd.h"
-#include "hw/ssi/pl022.h"
 #include "hw/sysbus.h"
-#include "net/net.h"
 #include "system/system.h"
 #include "target/riscv/cpu.h"
 #include <libfdt.h>
-
-static RISCVException pz7110_csr_any(CPURISCVState *env, int csrno)
-{
-    return RISCV_EXCP_NONE;
-}
-
-static RISCVException pz7110_read_zero(CPURISCVState *env, int csrno,
-                                       target_ulong *val)
-{
-    *val = 0;
-    return RISCV_EXCP_NONE;
-}
-
-static RISCVException pz7110_write_ignore(CPURISCVState *env, int csrno,
-                                          target_ulong val)
-{
-    return RISCV_EXCP_NONE;
-}
 
 static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_MROM] = { 0x2a000000, 0x10000 },
@@ -104,44 +80,6 @@ static const MemMapEntry pz7110_memmap[] = {
     [PZ7110_DRAM] = { 0x40000000, 0x0 },
 };
 
-static uint64_t pz7110_quiet_stub_read(void *opaque, hwaddr addr,
-                                       unsigned int size)
-{
-    return 0;
-}
-
-static void pz7110_quiet_stub_write(void *opaque, hwaddr addr, uint64_t value,
-                                    unsigned int size)
-{
-}
-
-static const MemoryRegionOps pz7110_quiet_stub_ops = {
-    .read = pz7110_quiet_stub_read,
-    .write = pz7110_quiet_stub_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid.min_access_size = 1,
-    .valid.max_access_size = 8,
-};
-
-static uint64_t pz7110_dw_uart_ext_read(void *opaque, hwaddr addr,
-                                        unsigned int size)
-{
-    return 0;
-}
-
-static void pz7110_dw_uart_ext_write(void *opaque, hwaddr addr,
-                                     uint64_t value, unsigned int size)
-{
-}
-
-static const MemoryRegionOps pz7110_dw_uart_ext_ops = {
-    .read = pz7110_dw_uart_ext_read,
-    .write = pz7110_dw_uart_ext_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid.min_access_size = 4,
-    .valid.max_access_size = 4,
-};
-
 static uint64_t pz7110_qspi_xip_read(void *opaque, hwaddr addr, unsigned size)
 {
     CadenceQSPIState *s = opaque;
@@ -197,46 +135,6 @@ static const MemoryRegionOps pz7110_qspi_xip_ops = {
         .max_access_size = 8,
     },
 };
-
-static void pz7110_create_quiet_stub(const char *name, hwaddr base,
-                                     hwaddr size)
-{
-    MemoryRegion *mr = g_new0(MemoryRegion, 1);
-
-    memory_region_init_io(mr, NULL, &pz7110_quiet_stub_ops, NULL, name, size);
-    memory_region_add_subregion(get_system_memory(), base, mr);
-}
-
-static void pz7110_create_i2c(hwaddr base, qemu_irq irq, bool eeprom)
-{
-    DeviceState *dev = qdev_new(TYPE_PZ7110_I2C);
-    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
-
-    qdev_prop_set_bit(dev, "eeprom", eeprom);
-    sysbus_realize_and_unref(sbd, &error_fatal);
-    sysbus_mmio_map(sbd, 0, base);
-    sysbus_connect_irq(sbd, 0, irq);
-}
-
-static DeviceState *pz7110_create_plic(const MemMapEntry *memmap,
-                                       int base_hartid, int hart_count)
-{
-    g_autofree char *plic_hart_config = g_strdup("M,MS,MS,MS,MS");
-
-    return sifive_plic_create(memmap[PZ7110_PLIC].base,
-                              plic_hart_config,
-                              hart_count,
-                              base_hartid,
-                              PZ7110_PLIC_NUM_SOURCES,
-                              (1U << PZ7110_PLIC_NUM_PRIO_BITS) - 1,
-                              PZ7110_PLIC_PRIORITY_BASE,
-                              PZ7110_PLIC_PENDING_BASE,
-                              PZ7110_PLIC_ENABLE_BASE,
-                              PZ7110_PLIC_ENABLE_STRIDE,
-                              PZ7110_PLIC_CONTEXT_BASE,
-                              PZ7110_PLIC_CONTEXT_STRIDE,
-                              memmap[PZ7110_PLIC].size);
-}
 
 static ssize_t pz7110_patch_spl_dtb(void *image, size_t image_size)
 {
@@ -313,117 +211,40 @@ static void pz7110_machine_init(MachineState *machine)
     RISCVPZ7110State *s = RISCV_PZ7110_MACHINE(machine);
     const MemMapEntry *memmap = pz7110_memmap;
     MemoryRegion *system_memory = get_system_memory();
-    MemoryRegion *mask_rom = g_new(MemoryRegion, 1);
-    MemoryRegion *sram = g_new(MemoryRegion, 1);
     MemoryRegion *xip = g_new(MemoryRegion, 1);
-    DeviceState *irqchip;
     DriveInfo *dinfo;
     const char *firmware_name;
     hwaddr firmware_load_addr = memmap[PZ7110_SRAM].base;
     target_ulong firmware_end_addr;
     ssize_t spl_dtb_offset = -1;
     uint64_t spl_fdt_load_addr = 0;
-    uint32_t park_loop[] = {
-        0x10500073, /* wfi */
-        0xffdff06f, /* j . */
-    };
 
-    /*
-     * SPL writes the SiFive U74 feature-disable CSR during early M-mode
-     * setup.  Keep this machine-local; do not modify global CSR tables for
-     * unrelated RISC-V machines.
-     */
-    {
-        static riscv_csr_operations u74_csr = {
-            .name = "u74_feature_disable",
-            .predicate = pz7110_csr_any,
-            .read = pz7110_read_zero,
-            .write = pz7110_write_ignore,
-        };
+    /* Create and realize SoC device */
+    object_initialize_child(OBJECT(machine), "soc", &s->soc, TYPE_PZ7110_SOC);
+    s->soc.memmap = memmap;
+    qdev_realize(DEVICE(&s->soc), NULL, &error_fatal);
 
-        csr_ops[0x7c1] = u74_csr;
-    }
-
-    object_initialize_child(OBJECT(machine), "e-cpus", &s->e_cpus,
-                            TYPE_RISCV_HART_ARRAY);
-    object_property_set_str(OBJECT(&s->e_cpus), "cpu-type",
-                            machine->cpu_type, &error_abort);
-    object_property_set_int(OBJECT(&s->e_cpus), "hartid-base", 0,
-                            &error_abort);
-    object_property_set_int(OBJECT(&s->e_cpus), "num-harts", 1,
-                            &error_abort);
-    object_property_set_int(OBJECT(&s->e_cpus), "resetvec",
-                            memmap[PZ7110_MROM].base + 0x100,
-                            &error_abort);
-    sysbus_realize(SYS_BUS_DEVICE(&s->e_cpus), &error_fatal);
-
-    object_initialize_child(OBJECT(machine), "u-cpus", &s->u_cpus,
-                            TYPE_RISCV_HART_ARRAY);
-    object_property_set_str(OBJECT(&s->u_cpus), "cpu-type",
-                            machine->cpu_type, &error_abort);
-    object_property_set_int(OBJECT(&s->u_cpus), "hartid-base", 1,
-                            &error_abort);
-    object_property_set_int(OBJECT(&s->u_cpus), "num-harts",
-                            PZ7110_HART_COUNT - 1, &error_abort);
-    object_property_set_int(OBJECT(&s->u_cpus), "resetvec",
-                            memmap[PZ7110_MROM].base, &error_abort);
-    sysbus_realize(SYS_BUS_DEVICE(&s->u_cpus), &error_fatal);
-
-    riscv_aclint_swi_create(memmap[PZ7110_CLINT].base,
-                            0, PZ7110_HART_COUNT, false);
-    riscv_aclint_mtimer_create(memmap[PZ7110_CLINT].base +
-                               RISCV_ACLINT_SWI_SIZE,
-                               RISCV_ACLINT_DEFAULT_MTIMER_SIZE,
-                               0, PZ7110_HART_COUNT,
-                               RISCV_ACLINT_DEFAULT_MTIMECMP,
-                               RISCV_ACLINT_DEFAULT_MTIME,
-                               RISCV_ACLINT_DEFAULT_TIMEBASE_FREQ,
-                               true);
-
-    irqchip = pz7110_create_plic(memmap, 0, PZ7110_HART_COUNT);
-
-    object_initialize_child(OBJECT(machine), "qspi", &s->qspi,
-                            TYPE_CADENCE_QSPI);
-    sysbus_realize(SYS_BUS_DEVICE(&s->qspi), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->qspi), 0,
-                    memmap[PZ7110_QSPI0].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->qspi), 0,
-                       qdev_get_gpio_in(irqchip, QSPI0_IRQ));
-
+    /* DRAM */
     memory_region_add_subregion(system_memory, memmap[PZ7110_DRAM].base,
                                 machine->ram);
 
-    memory_region_init_rom(mask_rom, NULL, "pz7110.mrom",
-                           memmap[PZ7110_MROM].size, &error_fatal);
-    memory_region_add_subregion(system_memory, memmap[PZ7110_MROM].base,
-                                mask_rom);
-
-    memory_region_init_ram(sram, NULL, "pz7110.sram",
-                           memmap[PZ7110_SRAM].size, &error_fatal);
-    memory_region_add_subregion(system_memory, memmap[PZ7110_SRAM].base,
-                                sram);
-
-    s->qspi.flash_size = memmap[PZ7110_QSPI_XIP].size;
-    s->qspi.flash_data = g_malloc(s->qspi.flash_size);
-    memset(s->qspi.flash_data, 0xff, s->qspi.flash_size);
-    memory_region_init_io(xip, NULL, &pz7110_qspi_xip_ops, &s->qspi,
+    /* QSPI XIP flash window */
+    s->soc.qspi.flash_size = memmap[PZ7110_QSPI_XIP].size;
+    s->soc.qspi.flash_data = g_malloc(s->soc.qspi.flash_size);
+    memset(s->soc.qspi.flash_data, 0xff, s->soc.qspi.flash_size);
+    memory_region_init_io(xip, NULL, &pz7110_qspi_xip_ops, &s->soc.qspi,
                           "pz7110.qspi_xip",
                           memmap[PZ7110_QSPI_XIP].size);
     memory_region_add_subregion(system_memory, memmap[PZ7110_QSPI_XIP].base,
                                 xip);
 
-    object_initialize_child(OBJECT(machine), "ccache", &s->ccache,
-                            TYPE_PZ7110_CCACHE);
-    sysbus_realize(SYS_BUS_DEVICE(&s->ccache), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->ccache), 0,
-                    memmap[PZ7110_CCACHE_IDX].base);
-
+    /* Load QSPI flash image if provided */
     dinfo = drive_get(IF_MTD, 0, 0);
     if (dinfo) {
         BlockBackend *blk = blk_by_legacy_dinfo(dinfo);
         int64_t flash_size = blk_getlength(blk);
 
-        if (blk_attach_dev(blk, DEVICE(&s->qspi)) < 0) {
+        if (blk_attach_dev(blk, DEVICE(&s->soc.qspi)) < 0) {
             error_report("Could not attach PZ7110 QSPI flash image");
             exit(1);
         }
@@ -434,361 +255,37 @@ static void pz7110_machine_init(MachineState *machine)
         if (flash_size > memmap[PZ7110_QSPI_XIP].size) {
             flash_size = memmap[PZ7110_QSPI_XIP].size;
         }
-        s->qspi.flash_size = flash_size;
-        if (blk_pread(blk, 0, flash_size, s->qspi.flash_data, 0) < 0) {
+        s->soc.qspi.flash_size = flash_size;
+        if (blk_pread(blk, 0, flash_size, s->soc.qspi.flash_data, 0) < 0) {
             error_report("Could not read PZ7110 QSPI flash image");
             exit(1);
         }
     }
 
-    for (int i = 0; i < ARRAY_SIZE(park_loop); i++) {
-        park_loop[i] = cpu_to_le32(park_loop[i]);
-    }
-
-    rom_add_blob_fixed_as("mrom.s7-park", park_loop, sizeof(park_loop),
-                          memmap[PZ7110_MROM].base + 0x100,
-                          &address_space_memory);
-
-    serial_mm_init(system_memory, memmap[PZ7110_UART0].base,
-                   2, qdev_get_gpio_in(irqchip, UART0_IRQ), 24000000,
-                   serial_hd(0), DEVICE_LITTLE_ENDIAN);
-
-    {
-        static MemoryRegion dw_uart0_ext;
-
-        memory_region_init_io(&dw_uart0_ext, OBJECT(machine),
-                              &pz7110_dw_uart_ext_ops, NULL,
-                              "pz7110.dw-uart0-ext", 0x40);
-        memory_region_add_subregion(system_memory,
-                                    memmap[PZ7110_UART0].base + 0xc0,
-                                    &dw_uart0_ext);
-    }
-
-    object_initialize_child(OBJECT(machine), "sys-crg", &s->sys_crg,
-                            TYPE_PZ7110_SYS_CRG);
-    sysbus_realize(SYS_BUS_DEVICE(&s->sys_crg), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sys_crg), 0,
-                    memmap[PZ7110_SYS_CRG_IDX].base);
-
-    object_initialize_child(OBJECT(machine), "stg-crg", &s->stg_crg,
-                            TYPE_PZ7110_STG_CRG);
-    sysbus_realize(SYS_BUS_DEVICE(&s->stg_crg), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->stg_crg), 0,
-                    memmap[PZ7110_STG_CRG_IDX].base);
-
-    object_initialize_child(OBJECT(machine), "aon-crg", &s->aon_crg,
-                            TYPE_PZ7110_AON_CRG);
-    sysbus_realize(SYS_BUS_DEVICE(&s->aon_crg), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->aon_crg), 0,
-                    memmap[PZ7110_AON_CRG_IDX].base);
-
-    object_initialize_child(OBJECT(machine), "sys-syscon", &s->sys_syscon,
-                            TYPE_PZ7110_SYS_SYSCON);
-    sysbus_realize(SYS_BUS_DEVICE(&s->sys_syscon), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sys_syscon), 0,
-                    memmap[PZ7110_SYS_SYSCON_IDX].base);
-
-    object_initialize_child(OBJECT(machine), "stg-syscon", &s->stg_syscon,
-                            TYPE_PZ7110_STG_SYSCON);
-    sysbus_realize(SYS_BUS_DEVICE(&s->stg_syscon), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->stg_syscon), 0,
-                    memmap[PZ7110_STG_SYSCON_IDX].base);
-
-    object_initialize_child(OBJECT(machine), "aon-syscon", &s->aon_syscon,
-                            TYPE_PZ7110_AON_SYSCON);
-    sysbus_realize(SYS_BUS_DEVICE(&s->aon_syscon), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->aon_syscon), 0,
-                    memmap[PZ7110_AON_SYSCON_IDX].base);
-
-    object_initialize_child(OBJECT(machine), "sys-iomux", &s->sys_iomux,
-                            TYPE_PZ7110_SYS_IOMUX);
-    sysbus_realize(SYS_BUS_DEVICE(&s->sys_iomux), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sys_iomux), 0,
-                    memmap[PZ7110_SYS_IOMUX_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->sys_iomux), 0,
-                       qdev_get_gpio_in(irqchip, SYS_GPIO_IRQ));
-
-    object_initialize_child(OBJECT(machine), "aon-iomux", &s->aon_iomux,
-                            TYPE_PZ7110_AON_IOMUX);
-    sysbus_realize(SYS_BUS_DEVICE(&s->aon_iomux), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->aon_iomux), 0,
-                    memmap[PZ7110_AON_IOMUX_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->aon_iomux), 0,
-                       qdev_get_gpio_in(irqchip, AON_GPIO_IRQ));
-
-    /*
-     * Temporary passive windows for early SPL register touches.  These are not
-     * complete device models; later subsystem commits replace them with
-     * register-aware models.
-    */
-    pz7110_create_quiet_stub("pz7110.spi-boot", 0x11000000, 0x10000);
-    pz7110_create_ddr_stub("pz7110.dmc", 0x15700000);
-    pz7110_create_ddr_stub("pz7110.ddr-phy", 0x13000000);
-    pz7110_create_quiet_stub("pz7110.otp", 0x17050000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.hdmi", 0x29590000, 0x4000);
-    pz7110_create_quiet_stub("pz7110.dssctrl", 0x295b0000, 0x1000);
-    pz7110_create_quiet_stub("pz7110.dc8200", 0x29400000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.mipi-dsi", 0x295d0000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.mipi-dphy", 0x295e0000, 0x10000);
-
-    object_initialize_child(OBJECT(machine), "pmu", &s->pmu, TYPE_PZ7110_PMU);
-    sysbus_realize(SYS_BUS_DEVICE(&s->pmu), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pmu), 0,
-                    memmap[PZ7110_PMU_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->pmu), 0,
-                       qdev_get_gpio_in(irqchip, PMU_IRQ));
-
-    object_initialize_child(OBJECT(machine), "vout-crg", &s->vout_crg,
-                            TYPE_PZ7110_VOUT_CRG);
-    sysbus_realize(SYS_BUS_DEVICE(&s->vout_crg), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->vout_crg), 0,
-                    memmap[PZ7110_VOUT_CRG_IDX].base);
-
-    object_initialize_child(OBJECT(machine), "timer", &s->timer,
-                            TYPE_PZ7110_TIMER);
-    sysbus_realize(SYS_BUS_DEVICE(&s->timer), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->timer), 0,
-                    memmap[PZ7110_TIMER_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->timer), 0,
-                       qdev_get_gpio_in(irqchip, TIMER0_IRQ));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->timer), 1,
-                       qdev_get_gpio_in(irqchip, TIMER1_IRQ));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->timer), 2,
-                       qdev_get_gpio_in(irqchip, TIMER2_IRQ));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->timer), 3,
-                       qdev_get_gpio_in(irqchip, TIMER3_IRQ));
-
-    object_initialize_child(OBJECT(machine), "wdt", &s->wdt, TYPE_PZ7110_WDT);
-    sysbus_realize(SYS_BUS_DEVICE(&s->wdt), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->wdt), 0,
-                    memmap[PZ7110_WDT_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->wdt), 0,
-                       qdev_get_gpio_in(irqchip, WDT_IRQ));
-
-    object_initialize_child(OBJECT(machine), "rtc", &s->rtc, TYPE_PZ7110_RTC);
-    sysbus_realize(SYS_BUS_DEVICE(&s->rtc), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->rtc), 0,
-                    memmap[PZ7110_RTC_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->rtc), 0,
-                       qdev_get_gpio_in(irqchip, RTC_MS_PULSE_IRQ));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->rtc), 1,
-                       qdev_get_gpio_in(irqchip, RTC_SEC_PULSE_IRQ));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->rtc), 2,
-                       qdev_get_gpio_in(irqchip, RTC_IRQ));
-
-    object_initialize_child(OBJECT(machine), "temp", &s->temp,
-                            TYPE_PZ7110_SFCTEMP);
-    sysbus_realize(SYS_BUS_DEVICE(&s->temp), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->temp), 0,
-                    memmap[PZ7110_SFCTEMP_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->temp), 0,
-                       qdev_get_gpio_in(irqchip, SFCTEMP_IRQ));
-
-    object_initialize_child(OBJECT(machine), "trng", &s->trng,
-                            TYPE_PZ7110_TRNG);
-    sysbus_realize(SYS_BUS_DEVICE(&s->trng), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->trng), 0,
-                    memmap[PZ7110_TRNG_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->trng), 0,
-                       qdev_get_gpio_in(irqchip, TRNG_IRQ));
-
-    object_initialize_child(OBJECT(machine), "crypto", &s->crypto,
-                            TYPE_PZ7110_CRYPTO);
-    sysbus_realize(SYS_BUS_DEVICE(&s->crypto), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->crypto), 0,
-                    memmap[PZ7110_CRYPTO_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->crypto), 0,
-                       qdev_get_gpio_in(irqchip, CRYPTO_IRQ));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->crypto), 1,
-                       qdev_get_gpio_in(irqchip, CRYPTO_DMA_IRQ));
-    pz7110_create_quiet_stub("pz7110.sec-dma",
-                             memmap[PZ7110_SEC_DMA_IDX].base,
-                             memmap[PZ7110_SEC_DMA_IDX].size);
-
-    object_initialize_child(OBJECT(machine), "gmac0", &s->gmac0,
-                            TYPE_PZ7110_GMAC);
-    s->gmac0.phy_addr = 0;
-    qemu_configure_nic_device(DEVICE(&s->gmac0), true, NULL);
-    sysbus_realize(SYS_BUS_DEVICE(&s->gmac0), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->gmac0), 0,
-                    memmap[PZ7110_GMAC0_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->gmac0), 0,
-                       qdev_get_gpio_in(irqchip, GMAC0_IRQ));
-
-    object_initialize_child(OBJECT(machine), "gmac1", &s->gmac1,
-                            TYPE_PZ7110_GMAC);
-    s->gmac1.phy_addr = 1;
-    qemu_configure_nic_device(DEVICE(&s->gmac1), true, NULL);
-    sysbus_realize(SYS_BUS_DEVICE(&s->gmac1), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->gmac1), 0,
-                    memmap[PZ7110_GMAC1_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->gmac1), 0,
-                       qdev_get_gpio_in(irqchip, GMAC1_IRQ));
-
-    object_initialize_child(OBJECT(machine), "dma", &s->dma, TYPE_PZ7110_DMA);
-    sysbus_realize(SYS_BUS_DEVICE(&s->dma), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->dma), 0,
-                    memmap[PZ7110_DMA_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 0,
-                       qdev_get_gpio_in(irqchip, DMA_IRQ));
-
-    object_initialize_child(OBJECT(machine), "pwm", &s->pwm, TYPE_PZ7110_PWM);
-    sysbus_realize(SYS_BUS_DEVICE(&s->pwm), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pwm), 0,
-                    memmap[PZ7110_PWM_IDX].base);
-
-    object_initialize_child(OBJECT(machine), "pz7110-usb", &s->usb,
-                            TYPE_PZ7110_USB);
-    sysbus_realize(SYS_BUS_DEVICE(&s->usb), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->usb), 0,
-                    memmap[PZ7110_USB_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->usb), 0,
-                       qdev_get_gpio_in(irqchip, USB_IRQ));
-
-    object_initialize_child(OBJECT(machine), "pcie0", &s->pcie0,
-                            TYPE_PZ7110_PCIE);
-    sysbus_realize(SYS_BUS_DEVICE(&s->pcie0), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie0), 0,
-                    memmap[PZ7110_PCIE0_APB_IDX].base);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie0), 1,
-                    memmap[PZ7110_PCIE0_CFG_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->pcie0), 0,
-                       qdev_get_gpio_in(irqchip, PCIE0_IRQ));
-
-    object_initialize_child(OBJECT(machine), "pcie1", &s->pcie1,
-                            TYPE_PZ7110_PCIE);
-    sysbus_realize(SYS_BUS_DEVICE(&s->pcie1), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie1), 0,
-                    memmap[PZ7110_PCIE1_APB_IDX].base);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie1), 1,
-                    memmap[PZ7110_PCIE1_CFG_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->pcie1), 0,
-                       qdev_get_gpio_in(irqchip, PCIE1_IRQ));
-
-    pz7110_create_i2c(memmap[PZ7110_I2C0].base,
-                      qdev_get_gpio_in(irqchip, I2C0_IRQ), false);
-    pz7110_create_i2c(memmap[PZ7110_I2C1].base,
-                      qdev_get_gpio_in(irqchip, I2C1_IRQ), false);
-    pz7110_create_i2c(memmap[PZ7110_I2C2].base,
-                      qdev_get_gpio_in(irqchip, I2C2_IRQ), false);
-    pz7110_create_i2c(memmap[PZ7110_I2C3].base,
-                      qdev_get_gpio_in(irqchip, I2C3_IRQ), false);
-    pz7110_create_i2c(memmap[PZ7110_I2C4].base,
-                      qdev_get_gpio_in(irqchip, I2C4_IRQ), false);
-    pz7110_create_i2c(memmap[PZ7110_I2C5].base,
-                      qdev_get_gpio_in(irqchip, I2C5_IRQ), true);
-    pz7110_create_i2c(memmap[PZ7110_I2C6].base,
-                      qdev_get_gpio_in(irqchip, I2C6_IRQ), false);
-
-    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI0].base,
-                         qdev_get_gpio_in(irqchip, SPI0_IRQ));
-    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI1].base,
-                         qdev_get_gpio_in(irqchip, SPI1_IRQ));
-    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI2].base,
-                         qdev_get_gpio_in(irqchip, SPI2_IRQ));
-    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI3].base,
-                         qdev_get_gpio_in(irqchip, SPI3_IRQ));
-    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI4].base,
-                         qdev_get_gpio_in(irqchip, SPI4_IRQ));
-    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI5].base,
-                         qdev_get_gpio_in(irqchip, SPI5_IRQ));
-    sysbus_create_simple(TYPE_PL022, memmap[PZ7110_SPI6].base,
-                         qdev_get_gpio_in(irqchip, SPI6_IRQ));
-
-    pz7110_create_quiet_stub("pz7110.tdm", 0x10090000, 0x1000);
-    pz7110_create_quiet_stub("pz7110.i2stx", 0x100c0000, 0x1000);
-    pz7110_create_quiet_stub("pz7110.pdm", 0x100d0000, 0x1000);
-    pz7110_create_quiet_stub("pz7110.i2srx", 0x100e0000, 0x1000);
-    pz7110_create_quiet_stub("pz7110.i2stx-4ch0", 0x120b0000, 0x1000);
-    pz7110_create_quiet_stub("pz7110.i2stx-4ch1", 0x120c0000, 0x1000);
-    pz7110_create_quiet_stub("pz7110.usb3-phy", 0x10200000, 0x1000);
-    pz7110_create_quiet_stub("pz7110.phyctrl0", 0x10210000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.phyctrl1", 0x10220000, 0x10000);
-    pz7110_create_quiet_stub("pz7110.mailbox",
-                             memmap[PZ7110_MAILBOX_IDX].base,
-                             memmap[PZ7110_MAILBOX_IDX].size);
-    pz7110_create_quiet_stub("pz7110.can0", memmap[PZ7110_CAN0_IDX].base,
-                             memmap[PZ7110_CAN0_IDX].size);
-    pz7110_create_quiet_stub("pz7110.can1", memmap[PZ7110_CAN1_IDX].base,
-                             memmap[PZ7110_CAN1_IDX].size);
-
-    object_initialize_child(OBJECT(machine), "sdio0", &s->sdio0,
-                            TYPE_PZ7110_SDIO);
-    dinfo = drive_get(IF_SD, 0, 1);
-    s->sdio0.card_present = dinfo != NULL;
-    s->sdio0.emmc_mode = true;
-    sysbus_realize(SYS_BUS_DEVICE(&s->sdio0), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sdio0), 0,
-                    memmap[PZ7110_SDIO0_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->sdio0), 0,
-                       qdev_get_gpio_in(irqchip, SDIO0_IRQ));
-    if (dinfo) {
-        DeviceState *card = qdev_new(TYPE_EMMC);
-
-        qdev_prop_set_drive_err(card, "drive", blk_by_legacy_dinfo(dinfo),
-                                &error_fatal);
-        qdev_realize_and_unref(card,
-                               qdev_get_child_bus(DEVICE(&s->sdio0),
-                                                  "sd-bus"),
-                               &error_fatal);
-    }
-
-    object_initialize_child(OBJECT(machine), "sdio1", &s->sdio1,
-                            TYPE_PZ7110_SDIO);
-    dinfo = drive_get(IF_SD, 0, 0);
-    s->sdio1.card_present = dinfo != NULL;
-    s->sdio1.emmc_mode = false;
-    sysbus_realize(SYS_BUS_DEVICE(&s->sdio1), &error_fatal);
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sdio1), 0,
-                    memmap[PZ7110_SDIO1_IDX].base);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->sdio1), 0,
-                       qdev_get_gpio_in(irqchip, SDIO1_IRQ));
-    if (dinfo) {
-        DeviceState *card = qdev_new(TYPE_SD_CARD);
-
-        qdev_prop_set_drive_err(card, "drive", blk_by_legacy_dinfo(dinfo),
-                                &error_fatal);
-        qdev_realize_and_unref(card,
-                               qdev_get_child_bus(DEVICE(&s->sdio1),
-                                                  "sd-bus"),
-                               &error_fatal);
-    }
-
-    firmware_name = riscv_default_firmware_name(&s->u_cpus);
+    /* Load SPL firmware into SRAM */
+    firmware_name = riscv_default_firmware_name(&s->soc.u74_cpus);
     firmware_end_addr = riscv_find_and_load_firmware(machine, firmware_name,
                                                      &firmware_load_addr,
                                                      NULL);
     if (firmware_end_addr > firmware_load_addr) {
         spl_dtb_offset = pz7110_patch_spl_dtb(
-            memory_region_get_ram_ptr(sram), memmap[PZ7110_SRAM].size);
+            memory_region_get_ram_ptr(s->soc.sram_mr),
+            memmap[PZ7110_SRAM].size);
     }
 
     if (spl_dtb_offset >= 0) {
         spl_fdt_load_addr = firmware_load_addr + spl_dtb_offset;
     }
 
-    {
-        uint32_t reset_vec[] = {
-            0x00000297,                  /* auipc  t0, 0 */
-            0xf1402573,                  /* csrr   a0, mhartid */
-            0x00000613,                  /* li     a2, 0 */
-            0x0202b583,                  /* ld     a1, 32(t0) */
-            0x0182b283,                  /* ld     t0, 24(t0) */
-            0x00028067,                  /* jr     t0 */
-            firmware_load_addr,
-            firmware_load_addr >> 32,
-            spl_fdt_load_addr,
-            spl_fdt_load_addr >> 32,
-        };
-
-        for (int i = 0; i < ARRAY_SIZE(reset_vec); i++) {
-            reset_vec[i] = cpu_to_le32(reset_vec[i]);
-        }
-
-        rom_add_blob_fixed_as("mrom.reset", reset_vec, sizeof(reset_vec),
+    /*
+     * Set up the standard reset vector in MROM.  All harts (0-4) start from
+     * the same address, enter SPL with a0=mhartid, a1=fdt_addr.
+     * SPL hart_lottery determines which hart boots; QEMU does not interfere.
+     */
+    riscv_setup_rom_reset_vec(machine, &s->soc.u74_cpus, firmware_load_addr,
                               memmap[PZ7110_MROM].base,
-                              &address_space_memory);
-    }
+                              memmap[PZ7110_MROM].size, 0,
+                              spl_fdt_load_addr);
 }
 
 static void pz7110_machine_class_init(ObjectClass *oc, void *data)
