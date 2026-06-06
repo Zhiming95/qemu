@@ -38,6 +38,7 @@ struct PZ7110SoCState {
     DeviceState parent;
 
     const MemMapEntry *memmap;
+    MemoryRegion        *mrom_mr;
     MemoryRegion        *sram_mr;
 
     CPUClusterState     s7_cluster;

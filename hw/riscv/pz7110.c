@@ -21,6 +21,7 @@
 #include "hw/sysbus.h"
 #include "system/system.h"
 #include "target/riscv/cpu.h"
+#include "target/riscv/cpu-qom.h"
 #include <libfdt.h>
 
 static const MemMapEntry pz7110_memmap[] = {
@@ -278,14 +279,111 @@ static void pz7110_machine_init(MachineState *machine)
     }
 
     /*
-     * Set up the standard reset vector in MROM.  All harts (0-4) start from
-     * the same address, enter SPL with a0=mhartid, a1=fdt_addr.
-     * SPL hart_lottery determines which hart boots; QEMU does not interfere.
+     * MROM layout for deterministic SPL boot with SMP support:
+     *
+     * 0x0000: U74 dispatcher (all U74 harts start here):
+     *   csrr t0, mhartid          # t0 = hart ID
+     *   addi t1, zero, 1          # t1 = 1
+     *   beq  t0, t1, +0xF8        # if mhartid == 1, jump to 0x0100
+     *   (fall through to IPI park loop for harts 2-4)
+     *
+     * 0x000c: IPI-aware park loop (harts 2-4):
+     *   addi t0, zero, 8          # t0 = MSIP bit
+     *   csrs mie, t0              # enable MSIP in mie
+     *   wfi                       # park until interrupt
+     *   csrr t0, mip              # check pending interrupts
+     *   andi t0, t0, 8            # MSIP bit (bit 3)
+     *   beqz t0, back to wfi      # no IPI → keep waiting
+     *   (IPI detected → jump to OpenSBI firmware base)
+     *
+     * 0x0024: IPI handler (harts 2-4):
+     *   csrr a0, mhartid          # a0 = hart ID
+     *   addi a1, zero, 0          # a1 = 0 (no FDT)
+     *   addi a2, zero, 0          # a2 = 0 (no fw_dynamic_info)
+     *   lui  t0, 0x40000          # t0 = 0x40000000 (OpenSBI entry)
+     *   jalr x0, t0, 0            # jump to OpenSBI
+     *
+     * 0x0060: S7 resetvec → park loop at 0x0068
+     * 0x0068: S7 park (wfi + self-jump)
+     *
+     * 0x0100: SPL trampoline (riscv_setup_rom_reset_vec)
+     *
+     * Flow: hart1 enters SPL at 0x0100, wins SPL lottery, boots.
+     * SPL sends IPIs (CLINT MSIP) to harts 2-4 during init.
+     * Harts 2-4 wake from WFI, detect MSIP, jump to OpenSBI 0x40000000.
+     * OpenSBI warmboot/HSM path lets Linux bring harts 2-4 online for SMP.
+     * 0x40000000 = CONFIG_SPL_OPENSBI_LOAD_ADDR from official VisionFive2 build.
      */
     riscv_setup_rom_reset_vec(machine, &s->soc.u74_cpus, firmware_load_addr,
-                              memmap[PZ7110_MROM].base,
-                              memmap[PZ7110_MROM].size, 0,
+                              memmap[PZ7110_MROM].base + 0x0100,
+                              memmap[PZ7110_MROM].size - 0x0100, 0,
                               spl_fdt_load_addr);
+    {
+        uint8_t *mrom_ptr = memory_region_get_ram_ptr(s->soc.mrom_mr);
+
+        /* 0x0000: csrr t0, mhartid */
+        mrom_ptr[0x000] = 0xf3; mrom_ptr[0x001] = 0x22;
+        mrom_ptr[0x002] = 0x40; mrom_ptr[0x003] = 0xf1;
+        /* 0x0004: addi t1, zero, 1 */
+        mrom_ptr[0x004] = 0x13; mrom_ptr[0x005] = 0x03;
+        mrom_ptr[0x006] = 0x10; mrom_ptr[0x007] = 0x00;
+        /* 0x0008: beq t0, t1, +0xF8 → if mhartid==1, jump to 0x0100 */
+        mrom_ptr[0x008] = 0x63; mrom_ptr[0x009] = 0x8c;
+        mrom_ptr[0x00a] = 0x62; mrom_ptr[0x00b] = 0x0e;
+
+        /* --- IPI-aware park loop for harts 2-4 (entry at 0x000c) --- */
+        /* 0x000c: addi t0, zero, 8 (t0 = MSIP bit) */
+        mrom_ptr[0x00c] = 0x93; mrom_ptr[0x00d] = 0x02;
+        mrom_ptr[0x00e] = 0x80; mrom_ptr[0x00f] = 0x00;
+        /* 0x0010: csrs mie, t0 (enable MSIP in mie) */
+        mrom_ptr[0x010] = 0xf3; mrom_ptr[0x011] = 0xa2;
+        mrom_ptr[0x012] = 0x42; mrom_ptr[0x013] = 0x30;
+        /* 0x0014: wfi */
+        mrom_ptr[0x014] = 0x73; mrom_ptr[0x015] = 0x00;
+        mrom_ptr[0x016] = 0x50; mrom_ptr[0x017] = 0x10;
+        /* 0x0018: csrr t0, mip (CSR 0x344) */
+        mrom_ptr[0x018] = 0xf3; mrom_ptr[0x019] = 0x22;
+        mrom_ptr[0x01a] = 0x40; mrom_ptr[0x01b] = 0x34;
+        /* 0x001c: andi t0, t0, 8 (check MSIP bit) */
+        mrom_ptr[0x01c] = 0x93; mrom_ptr[0x01d] = 0xf2;
+        mrom_ptr[0x01e] = 0x82; mrom_ptr[0x01f] = 0x00;
+        /* 0x0020: beq t0, zero, -12 → back to wfi at 0x0014 if no IPI */
+        mrom_ptr[0x020] = 0xe3; mrom_ptr[0x021] = 0x8a;
+        mrom_ptr[0x022] = 0x02; mrom_ptr[0x023] = 0xfe;
+
+        /* --- IPI detected: jump to OpenSBI (0x40000000) --- */
+        /* 0x0024: csrr a0, mhartid (a0 = hart ID for OpenSBI) */
+        mrom_ptr[0x024] = 0x73; mrom_ptr[0x025] = 0x25;
+        mrom_ptr[0x026] = 0x40; mrom_ptr[0x027] = 0xf1;
+        /* 0x0028: addi a1, zero, 0 (a1 = 0, no FDT) */
+        mrom_ptr[0x028] = 0x13; mrom_ptr[0x029] = 0x05;
+        mrom_ptr[0x02a] = 0x00; mrom_ptr[0x02b] = 0x00;
+        /* 0x002c: addi a2, zero, 0 (a2 = 0, no fw_dynamic_info) */
+        mrom_ptr[0x02c] = 0x13; mrom_ptr[0x02d] = 0x06;
+        mrom_ptr[0x02e] = 0x00; mrom_ptr[0x02f] = 0x00;
+        /* 0x0030: lui t0, 0x40000 → t0 = 0x40000000 (OpenSBI entry) */
+        mrom_ptr[0x030] = 0xb7; mrom_ptr[0x031] = 0x02;
+        mrom_ptr[0x032] = 0x00; mrom_ptr[0x033] = 0x40;
+        /* 0x0034: jalr x0, t0, 0 → jump to OpenSBI */
+        mrom_ptr[0x034] = 0x67; mrom_ptr[0x035] = 0x80;
+        mrom_ptr[0x036] = 0x02; mrom_ptr[0x037] = 0x00;
+        /* 0x0038-0x004f: padding */
+        memset(&mrom_ptr[0x038], 0, 0x18);
+
+        /* --- S7 park loop at 0x0060 --- */
+        /* 0x0060: jal x0, +8 → jump to 0x0068 */
+        mrom_ptr[0x060] = 0x6f; mrom_ptr[0x061] = 0x00;
+        mrom_ptr[0x062] = 0x80; mrom_ptr[0x063] = 0x00;
+        /* 0x0064: nop */
+        mrom_ptr[0x064] = 0x13; mrom_ptr[0x065] = 0x00;
+        mrom_ptr[0x066] = 0x00; mrom_ptr[0x067] = 0x00;
+        /* 0x0068: wfi (S7 permanent park) */
+        mrom_ptr[0x068] = 0x73; mrom_ptr[0x069] = 0x00;
+        mrom_ptr[0x06a] = 0x50; mrom_ptr[0x06b] = 0x10;
+        /* 0x006c: jal x0, -4 → back to wfi */
+        mrom_ptr[0x06c] = 0x6f; mrom_ptr[0x06d] = 0xf0;
+        mrom_ptr[0x06e] = 0xdf; mrom_ptr[0x06f] = 0xff;
+    }
 }
 
 static void pz7110_machine_class_init(ObjectClass *oc, void *data)
@@ -297,7 +395,7 @@ static void pz7110_machine_class_init(ObjectClass *oc, void *data)
     mc->max_cpus = PZ7110_HART_COUNT;
     mc->min_cpus = PZ7110_HART_COUNT;
     mc->default_cpus = PZ7110_HART_COUNT;
-    mc->default_cpu_type = TYPE_RISCV_CPU_BASE;
+    mc->default_cpu_type = TYPE_RISCV_CPU_PZ7110_U74;
     mc->default_ram_id = "pz7110.ram";
     mc->default_ram_size = 4 * GiB;
     mc->block_default_type = IF_MTD;

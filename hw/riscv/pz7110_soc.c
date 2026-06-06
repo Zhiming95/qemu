@@ -16,6 +16,7 @@
 #include "hw/riscv/pz7110.h"
 #include "hw/riscv/pz7110_soc.h"
 #include "hw/riscv/sifive_cpu.h"
+#include "target/riscv/cpu-qom.h"
 #include "hw/riscv/pz7110_ddr_stub.h"
 #include "hw/riscv/riscv_hart.h"
 #include "hw/sd/sd.h"
@@ -143,7 +144,8 @@ static void pz7110_soc_instance_init(Object *obj)
                             TYPE_RISCV_HART_ARRAY);
     qdev_prop_set_uint32(DEVICE(&s->s7_cpus), "num-harts", 1);
     qdev_prop_set_uint32(DEVICE(&s->s7_cpus), "hartid-base", 0);
-    qdev_prop_set_string(DEVICE(&s->s7_cpus), "cpu-type", SIFIVE_E_CPU);
+    qdev_prop_set_string(DEVICE(&s->s7_cpus), "cpu-type",
+                         TYPE_RISCV_CPU_PZ7110_S7);
     object_initialize_child(OBJECT(&s->u74_cluster), "u74-cpus", &s->u74_cpus,
                             TYPE_RISCV_HART_ARRAY);
     qdev_prop_set_uint32(DEVICE(&s->u74_cpus), "num-harts",
@@ -210,13 +212,14 @@ static void pz7110_soc_realize(DeviceState *dev, Error **errp)
     }
 
     /*
-     * Both S7 and U74 harts share the same reset vector at MROM base.
-     * This follows the sifive_u pattern: E51 and U54 both start from
-     * the same resetvec address.  SPL hart_lottery handles multi-hart
-     * coordination; QEMU does not select a boot hart.
+     * S7 monitor core (hart 0): park loop at MROM+0x0060.
+     * U74 application cores (harts 1-4): reset vector at MROM base,
+     * where pz7110_machine_init writes a mhartid-check dispatcher
+     * that sends hart 1 to SPL and parks harts 2-4 until MSIP IPI,
+     * then jumps to OpenSBI firmware base (0x40000000).
      */
     qdev_prop_set_uint64(DEVICE(&soc->s7_cpus), "resetvec",
-                         memmap[PZ7110_MROM].base);
+                         memmap[PZ7110_MROM].base + 0x0060);
     sysbus_realize(SYS_BUS_DEVICE(&soc->s7_cpus), &error_fatal);
 
     qdev_prop_set_string(DEVICE(&soc->u74_cpus), "cpu-type",
@@ -242,6 +245,7 @@ static void pz7110_soc_realize(DeviceState *dev, Error **errp)
                                memmap[PZ7110_MROM].size, &error_fatal);
         memory_region_add_subregion(system_memory,
                                     memmap[PZ7110_MROM].base, mask_rom);
+        soc->mrom_mr = mask_rom;
     }
 
     /* SRAM: SPL loads here */
